@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data and generated models
+data/test_scenarios/*.mp4
+data/test_scenarios/*.avi
+models/*.h5
+models/*.pkl
+
+# Output
+*.log
+docs/thesis/figures/*.png
+!docs/thesis/figures/.gitkeep
