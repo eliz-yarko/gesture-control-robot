@@ -18,6 +18,9 @@ htmlcov/
 .idea/
 *.swp
 
+# Local Codex context
+AGENTS.md
+
 # OS
 .DS_Store
 Thumbs.db
