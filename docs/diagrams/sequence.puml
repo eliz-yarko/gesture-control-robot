@@ -1,0 +1,24 @@
+@startuml
+title Sequence diagram: frame-to-command pipeline
+
+actor Operator
+participant "VideoCapture" as Capture
+participant "HandDetector" as Detector
+participant "StaticGestureClassifier" as Static
+participant "TrajectoryBuffer" as Buffer
+participant "DynamicGestureClassifier" as Dynamic
+participant "CommandMapper" as Mapper
+participant "CommandSender" as Sender
+
+Operator -> Capture : performs gesture
+Capture -> Detector : frame
+Detector -> Static : landmarks
+Static --> Mapper : static prediction
+Detector -> Buffer : landmarks
+Buffer -> Dynamic : trajectory window
+Dynamic --> Mapper : dynamic prediction
+Mapper -> Mapper : debounce and safety filter
+Mapper --> Sender : confirmed command
+Sender --> Operator : robot action / feedback
+
+@enduml

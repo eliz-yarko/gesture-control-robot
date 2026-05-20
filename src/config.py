@@ -1,0 +1,94 @@
+"""Application configuration for the gesture control subsystem."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class VideoConfig:
+    """Video capture settings."""
+
+    camera_index: int = 0
+    frame_width: int = 640
+    frame_height: int = 480
+    target_fps: int = 30
+    mirror_frame: bool = True
+
+
+@dataclass(frozen=True)
+class HandDetectionConfig:
+    """MediaPipe hand detector settings."""
+
+    max_num_hands: int = 1
+    min_detection_confidence: float = 0.7
+    min_tracking_confidence: float = 0.7
+
+
+@dataclass(frozen=True)
+class StaticClassifierConfig:
+    """Rule-based static classifier thresholds."""
+
+    extended_finger_ratio: float = 1.12
+    thumb_extended_ratio: float = 1.05
+    direction_margin: float = 0.05
+    ok_tip_distance_ratio: float = 0.16
+    min_confidence: float = 0.6
+
+
+@dataclass(frozen=True)
+class DynamicClassifierConfig:
+    """Trajectory-based dynamic classifier thresholds."""
+
+    buffer_size: int = 30
+    min_horizontal_displacement: float = 0.18
+    max_vertical_drift: float = 0.14
+    min_wave_direction_changes: int = 2
+    min_circle_radius: float = 0.04
+    max_circle_radius_cv: float = 0.45
+    min_circle_angle_span: float = 5.0
+    min_pull_scale_growth: float = 0.2
+    min_confidence: float = 0.6
+
+
+@dataclass(frozen=True)
+class CalibrationConfig:
+    """Adaptive user calibration settings."""
+
+    samples_per_gesture: int = 5
+    sigma_multiplier: float = 2.0
+    profile_directory: str = "data/user_profiles"
+
+
+@dataclass(frozen=True)
+class CommandMappingConfig:
+    """Debouncing and command emission settings."""
+
+    static_confirmation_frames: int = 5
+    dynamic_confirmation_frames: int = 1
+    emergency_confirmation_frames: int = 3
+    min_confidence: float = 0.6
+    repeat_same_command: bool = False
+
+
+@dataclass(frozen=True)
+class SenderConfig:
+    """Robot command transport settings."""
+
+    serial_port: str = "COM3"
+    baudrate: int = 115200
+    timeout_seconds: float = 1.0
+    ros_topic: str = "/cmd_vel"
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    """Root configuration object used by the subsystem."""
+
+    video: VideoConfig = field(default_factory=VideoConfig)
+    hand_detection: HandDetectionConfig = field(default_factory=HandDetectionConfig)
+    static_classifier: StaticClassifierConfig = field(default_factory=StaticClassifierConfig)
+    dynamic_classifier: DynamicClassifierConfig = field(default_factory=DynamicClassifierConfig)
+    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
+    command_mapping: CommandMappingConfig = field(default_factory=CommandMappingConfig)
+    sender: SenderConfig = field(default_factory=SenderConfig)
