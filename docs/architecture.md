@@ -11,12 +11,18 @@ UX-фідбек без переписування базової архітек�
 
 1. `src.domain` - стабільні ідентифікатори жестів, команд і результатів класифікації.
 2. `src.config` - конфігураційні dataclass-об'єкти для порогів, буферів і каналів зв'язку.
-3. `src.utils.geometry` - геометричні операції над 21 ключовою точкою MediaPipe Hands.
-4. `src.recognition.static_classifier` - rule-based класифікатор 10 статичних жестів.
-5. `src.recognition.trajectory_buffer` - буфер ознак траєкторії для динамічних жестів.
-6. `src.recognition.dynamic_classifier` - baseline-класифікатор 3 динамічних жестів.
-7. `src.interpretation.command_mapper` - debouncing і перетворення жестів у команди.
-8. `src.transmission` - інтерфейси передачі команд: mock, UART, ROS.
+3. `src.capture.video_capture` - читання кадрів з камери або відеофайлу, resize, mirror,
+   BGR-to-RGB preprocessing.
+4. `src.recognition.hand_detector` - wrapper над MediaPipe Hands, який повертає 21 ключову
+   точку руки та handedness.
+5. `src.utils.geometry` - геометричні операції над 21 ключовою точкою MediaPipe Hands.
+6. `src.recognition.static_classifier` - rule-based класифікатор 10 статичних жестів.
+7. `src.recognition.trajectory_buffer` - буфер ознак траєкторії для динамічних жестів.
+8. `src.recognition.dynamic_classifier` - baseline-класифікатор 3 динамічних жестів.
+9. `src.interpretation.command_mapper` - debouncing і перетворення жестів у команди.
+10. `src.transmission` - інтерфейси передачі команд: mock, UART, ROS.
+11. `src.pipeline` - прикладний pipeline, який поєднує детекцію, класифікацію,
+    інтерпретацію та відправлення команд.
 
 ## Потік даних
 

@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import monotonic
 
-from src.utils.geometry import Landmark, hand_scale, palm_center, to_landmarks
+from src.utils.geometry import Landmark, LandmarkSequence, hand_scale, palm_center, to_landmarks
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,11 @@ class TrajectoryBuffer:
 
         self._points.clear()
 
-    def add_landmarks(self, raw_landmarks: list[list[float]], timestamp: float | None = None) -> None:
+    def add_landmarks(
+        self,
+        raw_landmarks: LandmarkSequence,
+        timestamp: float | None = None,
+    ) -> None:
         """Extract trajectory features from landmarks and append them."""
 
         landmarks = to_landmarks(raw_landmarks)

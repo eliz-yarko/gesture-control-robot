@@ -32,7 +32,8 @@ class RosCommandSender(CommandSender):
             import rospy  # type: ignore[import-not-found]
             from geometry_msgs.msg import Twist  # type: ignore[import-not-found]
         except ImportError as exc:
-            raise RuntimeError("rospy and geometry_msgs are required for RosCommandSender.") from exc
+            message = "rospy and geometry_msgs are required for RosCommandSender."
+            raise RuntimeError(message) from exc
 
         self._twist_type = Twist
         self._publisher = rospy.Publisher(self._config.ros_topic, Twist, queue_size=10)

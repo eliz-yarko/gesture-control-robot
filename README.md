@@ -10,9 +10,11 @@
 Репозиторій переведено з порожнього scaffold у foundation-рівень дипломної системи:
 
 - визначено доменні типи жестів і команд;
+- додано OpenCV-ready модуль захоплення та preprocessing кадрів;
+- додано MediaPipe-ready wrapper для детектування 21 ключової точки руки;
 - реалізовано rule-based класифікатор 10 статичних жестів;
 - реалізовано baseline-класифікатор 3 динамічних жестів через буфер траєкторії;
-- додано debouncing і map жестів у команди робота;
+- додано frame-to-command pipeline, debouncing і map жестів у команди робота;
 - підготовлено mock/UART/ROS транспортний шар;
 - додано перші unit-тести та архітектурну документацію.
 
@@ -23,6 +25,12 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python -m pytest tests/ -v
+```
+
+Запуск прототипу з камерою після встановлення залежностей:
+
+```powershell
+python -m src.main --camera 0 --debug --visualize
 ```
 
 ## Структура
