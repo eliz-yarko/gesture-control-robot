@@ -78,7 +78,7 @@ class GesturePrediction:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def unknown(cls, reason: str = "no_match") -> "GesturePrediction":
+    def unknown(cls, reason: str = "no_match") -> GesturePrediction:
         """Build a normalized unknown prediction."""
 
         return cls(

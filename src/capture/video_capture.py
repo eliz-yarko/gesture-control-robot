@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any
@@ -106,7 +107,7 @@ class VideoCapture:
             self._capture.release()
             self._capture = None
 
-    def __enter__(self) -> "VideoCapture":
+    def __enter__(self) -> VideoCapture:
         """Open the capture source when entering a context manager."""
 
         self.open()
@@ -129,7 +130,7 @@ class VideoCapture:
             return self._cv2
 
         try:
-            import cv2  # type: ignore[import-not-found]
+            cv2 = importlib.import_module("cv2")
         except ImportError as exc:
             raise RuntimeError("OpenCV is required for VideoCapture.") from exc
 

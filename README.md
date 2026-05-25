@@ -27,6 +27,15 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 ```
 
+## Перевірка якості
+
+```powershell
+python -m pytest tests/ -v --cov=src --cov-report=term-missing
+python -m ruff check src tests
+python -m black --check src tests
+python -m mypy src
+```
+
 Запуск прототипу з камерою після встановлення залежностей:
 
 ```powershell

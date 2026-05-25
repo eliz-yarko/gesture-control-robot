@@ -39,7 +39,7 @@ class _FakeCv2:
     def __init__(self, frames: list[object]) -> None:
         self.capture = _FakeCapture(frames)
 
-    def VideoCapture(self, source: int | str) -> "_FakeCapture":  # noqa: N802
+    def VideoCapture(self, source: int | str) -> _FakeCapture:  # noqa: N802
         self.capture.source = source
         return self.capture
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -56,7 +57,7 @@ class HandDetector:
             close()
         self._hands = None
 
-    def __enter__(self) -> "HandDetector":
+    def __enter__(self) -> HandDetector:
         """Initialize MediaPipe Hands when entering a context manager."""
 
         self._require_hands()
@@ -85,7 +86,7 @@ class HandDetector:
             return self._mediapipe
 
         try:
-            import mediapipe  # type: ignore[import-not-found]
+            mediapipe = importlib.import_module("mediapipe")
         except ImportError as exc:
             raise RuntimeError("MediaPipe is required for HandDetector.") from exc
 
@@ -99,30 +100,27 @@ class HandDetector:
 
         detections: list[HandDetection] = []
         for index, landmarks_item in enumerate(hand_landmarks):
-            classification = _classification_at(handedness_items, index)
+            label, score = _classification_at(handedness_items, index)
             detections.append(
                 HandDetection(
                     landmarks=[
                         (float(point.x), float(point.y), float(point.z))
                         for point in landmarks_item.landmark
                     ],
-                    handedness=classification["label"],
-                    score=classification["score"],
+                    handedness=label,
+                    score=score,
                 )
             )
         return detections
 
 
-def _classification_at(handedness_items: list[Any], index: int) -> dict[str, float | str]:
+def _classification_at(handedness_items: list[Any], index: int) -> tuple[str, float]:
     if index >= len(handedness_items):
-        return {"label": "Unknown", "score": 0.0}
+        return ("Unknown", 0.0)
 
     classification = getattr(handedness_items[index], "classification", [])
     if not classification:
-        return {"label": "Unknown", "score": 0.0}
+        return ("Unknown", 0.0)
 
     first = classification[0]
-    return {
-        "label": str(getattr(first, "label", "Unknown")),
-        "score": float(getattr(first, "score", 0.0)),
-    }
+    return (str(getattr(first, "label", "Unknown")), float(getattr(first, "score", 0.0)))

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from types import TracebackType
+from typing import Any
 
 from src.config import SenderConfig
 from src.domain import CommandEvent
@@ -19,9 +21,9 @@ class SerialCommandSender(CommandSender):
         """Initialize sender configuration without opening the port."""
 
         self._config = config or SenderConfig()
-        self._serial_connection: object | None = None
+        self._serial_connection: Any | None = None
 
-    def __enter__(self) -> "SerialCommandSender":
+    def __enter__(self) -> SerialCommandSender:
         """Open serial connection when entering a context manager."""
 
         self.open()
@@ -45,7 +47,7 @@ class SerialCommandSender(CommandSender):
         """
 
         try:
-            import serial  # type: ignore[import-not-found]
+            serial = importlib.import_module("serial")
         except ImportError as exc:
             raise RuntimeError("pySerial is required for SerialCommandSender.") from exc
 
@@ -61,8 +63,7 @@ class SerialCommandSender(CommandSender):
 
         if self._serial_connection is None:
             return
-        close_method = getattr(self._serial_connection, "close")
-        close_method()
+        self._serial_connection.close()
         logger.info("Closed serial port %s", self._config.serial_port)
         self._serial_connection = None
 
@@ -72,6 +73,5 @@ class SerialCommandSender(CommandSender):
         if self._serial_connection is None:
             raise RuntimeError("Serial port is not open.")
         packet = f"{event.command.value};{int(event.gesture_id)};{event.confidence:.3f}\n"
-        write_method = getattr(self._serial_connection, "write")
-        write_method(packet.encode("ascii"))
+        self._serial_connection.write(packet.encode("ascii"))
         logger.info("Sent command over UART: %s", event.command.value)

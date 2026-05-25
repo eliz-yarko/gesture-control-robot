@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from src.config import SenderConfig
 from src.domain import CommandEvent, RobotCommand
@@ -18,8 +19,8 @@ class RosCommandSender(CommandSender):
         """Initialize ROS sender and lazily import ROS packages."""
 
         self._config = config or SenderConfig()
-        self._publisher: object | None = None
-        self._twist_type: type[object] | None = None
+        self._publisher: Any | None = None
+        self._twist_type: Any | None = None
 
     def open(self) -> None:
         """Create ROS publisher.
@@ -47,23 +48,22 @@ class RosCommandSender(CommandSender):
 
         twist = self._twist_type()
         _apply_command_to_twist(event.command, twist)
-        publish_method = getattr(self._publisher, "publish")
-        publish_method(twist)
+        self._publisher.publish(twist)
         logger.info("Published ROS command: %s", event.command.value)
 
 
-def _apply_command_to_twist(command: RobotCommand, twist: object) -> None:
-    linear = getattr(twist, "linear")
-    angular = getattr(twist, "angular")
+def _apply_command_to_twist(command: RobotCommand, twist: Any) -> None:
+    linear = twist.linear
+    angular = twist.angular
 
     if command == RobotCommand.FORWARD:
-        setattr(linear, "x", 0.2)
+        linear.x = 0.2
     elif command == RobotCommand.TURN_LEFT:
-        setattr(angular, "z", 0.6)
+        angular.z = 0.6
     elif command == RobotCommand.TURN_RIGHT:
-        setattr(angular, "z", -0.6)
+        angular.z = -0.6
     elif command == RobotCommand.ROTATE_360:
-        setattr(angular, "z", 0.8)
+        angular.z = 0.8
     elif command in {RobotCommand.STOP, RobotCommand.EMERGENCY_STOP}:
-        setattr(linear, "x", 0.0)
-        setattr(angular, "z", 0.0)
+        linear.x = 0.0
+        angular.z = 0.0

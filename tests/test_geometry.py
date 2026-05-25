@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from src.utils.geometry import angle_between, distance, normalize_landmarks, to_landmarks
 
 

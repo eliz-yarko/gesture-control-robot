@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from src.config import CommandMappingConfig
 from src.domain import CommandEvent, GestureID, GesturePrediction, RobotCommand
 
-
 DEFAULT_GESTURE_COMMAND_MAP: dict[GestureID, RobotCommand] = {
     GestureID.OPEN_PALM: RobotCommand.STOP,
     GestureID.FIST: RobotCommand.FORWARD,

@@ -62,9 +62,9 @@ def angle_between(first: Landmark, second: Landmark) -> float:
     if first_norm == 0.0 or second_norm == 0.0:
         raise ValueError("Cannot calculate an angle for a zero-length vector.")
 
-    cosine = (
-        first[0] * second[0] + first[1] * second[1] + first[2] * second[2]
-    ) / (first_norm * second_norm)
+    cosine = (first[0] * second[0] + first[1] * second[1] + first[2] * second[2]) / (
+        first_norm * second_norm
+    )
     clamped = max(-1.0, min(1.0, cosine))
     return math.acos(clamped)
 
