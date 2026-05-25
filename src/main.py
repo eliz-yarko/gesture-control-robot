@@ -7,6 +7,7 @@ import importlib
 import logging
 from collections.abc import Sequence
 
+from src.calibration import AdaptiveCalibrator, CalibrationProfileStore
 from src.capture.video_capture import VideoCapture
 from src.config import AppConfig, VideoConfig
 from src.pipeline import GestureControlPipeline, PipelineResult
@@ -28,6 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print recognized gestures and commands.",
     )
     parser.add_argument("--visualize", action="store_true", help="Show the OpenCV preview window.")
+    parser.add_argument(
+        "--calibration-profile",
+        type=str,
+        default=None,
+        help="Path to a user calibration profile JSON file.",
+    )
     parser.add_argument(
         "--sender",
         choices=("mock", "serial"),
@@ -56,7 +63,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         sender = MockCommandSender()
     capture = VideoCapture(config.video, video_path=args.video)
-    pipeline = GestureControlPipeline(config=config, command_sender=sender)
+    calibrator = None
+    if args.calibration_profile is not None:
+        profile = CalibrationProfileStore(config.calibration).load_path(args.calibration_profile)
+        calibrator = AdaptiveCalibrator(profile, config.calibration)
+    pipeline = GestureControlPipeline(
+        config=config,
+        command_sender=sender,
+        calibrator=calibrator,
+    )
 
     cv2_module = None
     if args.visualize:

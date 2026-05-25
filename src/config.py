@@ -57,6 +57,7 @@ class CalibrationConfig:
 
     samples_per_gesture: int = 5
     sigma_multiplier: float = 2.0
+    min_calibrated_confidence: float = 0.65
     profile_directory: str = "data/user_profiles"
 
 

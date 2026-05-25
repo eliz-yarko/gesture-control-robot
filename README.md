@@ -14,6 +14,7 @@
 - додано MediaPipe-ready wrapper для детектування 21 ключової точки руки;
 - реалізовано rule-based класифікатор 10 статичних жестів;
 - реалізовано baseline-класифікатор 3 динамічних жестів через буфер траєкторії;
+- додано adaptive calibration і JSON-профілі користувачів;
 - додано frame-to-command pipeline, debouncing і map жестів у команди робота;
 - підготовлено mock/UART/ROS транспортний шар;
 - додано перші unit-тести та архітектурну документацію.
@@ -40,6 +41,13 @@ python -m mypy src
 
 ```powershell
 python -m src.main --camera 0 --debug --visualize
+```
+
+Збір персонального профілю калібрування:
+
+```powershell
+python scripts/calibrate_user.py --user-id operator_01 --camera 0 --samples 5
+python -m src.main --camera 0 --debug --visualize --calibration-profile data/user_profiles/operator_01.json
 ```
 
 ## Структура

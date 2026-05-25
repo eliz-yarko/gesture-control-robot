@@ -19,9 +19,11 @@ UX-фідбек без переписування базової архітек�
 6. `src.recognition.static_classifier` - rule-based класифікатор 10 статичних жестів.
 7. `src.recognition.trajectory_buffer` - буфер ознак траєкторії для динамічних жестів.
 8. `src.recognition.dynamic_classifier` - baseline-класифікатор 3 динамічних жестів.
-9. `src.interpretation.command_mapper` - debouncing і перетворення жестів у команди.
-10. `src.transmission` - інтерфейси передачі команд: mock, UART, ROS.
-11. `src.pipeline` - прикладний pipeline, який поєднує детекцію, класифікацію,
+9. `src.calibration` - адаптивне калібрування користувача, персональні профілі та
+   коригування confidence.
+10. `src.interpretation.command_mapper` - debouncing і перетворення жестів у команди.
+11. `src.transmission` - інтерфейси передачі команд: mock, UART, ROS.
+12. `src.pipeline` - прикладний pipeline, який поєднує детекцію, класифікацію,
     інтерпретацію та відправлення команд.
 
 ## Потік даних
@@ -33,6 +35,7 @@ flowchart LR
     Static["StaticGestureClassifier\n10 static gestures"]
     Buffer["TrajectoryBuffer\n30-frame window"]
     Dynamic["DynamicGestureClassifier\n3 dynamic gestures"]
+    Calibration["AdaptiveCalibrator\nuser profile"]
     Mapper["CommandMapper\ndebouncing + safety"]
     Sender["CommandSender\nMock / UART / ROS"]
 
@@ -41,7 +44,9 @@ flowchart LR
     Detector --> Buffer
     Buffer --> Dynamic
     Static --> Mapper
-    Dynamic --> Mapper
+    Dynamic --> Calibration
+    Static --> Calibration
+    Calibration --> Mapper
     Mapper --> Sender
 ```
 
@@ -80,8 +85,7 @@ flowchart LR
 
 Наступні модулі додаються поверх поточного foundation-рівня:
 
-1. `calibration` - персональні профілі користувачів і адаптивні пороги.
-2. LSTM/1D-CNN класифікатор динамічних жестів, який використовує дані `TrajectoryBuffer`.
-3. `feedback` - UX-шар візуального підтвердження команди.
-4. `experiments` - відтворювані експерименти з CSV, графіками та довірчими інтервалами.
-5. `docs/ux_research` - протоколи інтерв'ю, картковий метод, SUS/NASA-TLX.
+1. LSTM/1D-CNN класифікатор динамічних жестів, який використовує дані `TrajectoryBuffer`.
+2. `feedback` - UX-шар візуального підтвердження команди.
+3. `experiments` - відтворювані експерименти з CSV, графіками та довірчими інтервалами.
+4. `docs/ux_research` - протоколи інтерв'ю, картковий метод, SUS/NASA-TLX.

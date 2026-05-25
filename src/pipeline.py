@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.calibration.adaptive_calibrator import AdaptiveCalibrator
 from src.capture.video_capture import CapturedFrame
 from src.config import AppConfig
 from src.domain import CommandEvent, GestureID, GesturePrediction
@@ -50,6 +51,7 @@ class GestureControlPipeline:
         trajectory_buffer: TrajectoryBuffer | None = None,
         command_mapper: CommandMapper | None = None,
         command_sender: CommandSender | None = None,
+        calibrator: AdaptiveCalibrator | None = None,
     ) -> None:
         """Initialize the processing pipeline."""
 
@@ -66,6 +68,7 @@ class GestureControlPipeline:
         )
         self._command_mapper = command_mapper or CommandMapper(self._config.command_mapping)
         self._command_sender = command_sender
+        self._calibrator = calibrator
 
     def process(self, frame: CapturedFrame) -> PipelineResult:
         """Process one captured frame and optionally send a confirmed command."""
@@ -88,6 +91,11 @@ class GestureControlPipeline:
         self._trajectory_buffer.add_landmarks(detection.landmarks, timestamp=frame.timestamp)
         dynamic_prediction = self._dynamic_classifier.classify(self._trajectory_buffer)
         selected_prediction = _select_prediction(static_prediction, dynamic_prediction)
+        if self._calibrator is not None:
+            selected_prediction = self._calibrator.adjust_prediction(
+                selected_prediction,
+                detection.landmarks,
+            )
         command_event = self._command_mapper.update(selected_prediction)
 
         if command_event is not None and self._command_sender is not None:

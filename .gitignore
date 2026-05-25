@@ -28,6 +28,7 @@ Thumbs.db
 # Large data and generated models
 data/test_scenarios/*.mp4
 data/test_scenarios/*.avi
+data/user_profiles/*.json
 models/*.h5
 models/*.pkl
 
