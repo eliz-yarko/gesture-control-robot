@@ -43,6 +43,18 @@ python -m mypy src
 python -m src.main --camera 0 --debug --visualize
 ```
 
+Локальний web UI для демонстрації:
+
+```powershell
+python -m src.web_ui --camera 0 --host 127.0.0.1 --port 8000
+```
+
+Після запуску відкрити `http://127.0.0.1:8000`. Для відеофайлу:
+
+```powershell
+python -m src.web_ui --video data/test_scenarios/demo.mp4 --loop-video
+```
+
 Збір персонального профілю калібрування:
 
 ```powershell
