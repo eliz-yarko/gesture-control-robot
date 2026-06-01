@@ -37,6 +37,28 @@ def test_read_manifest_normalizes_labels_and_relative_paths(tmp_path: Path) -> N
     assert samples[0].dataset == "hagrid_v2"
 
 
+def test_read_manifest_supports_video_segments(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.csv"
+    video_path = tmp_path / "clip.avi"
+    video_path.write_text("placeholder", encoding="utf-8")
+    manifest_path.write_text(
+        "\n".join(
+            [
+                "sample_id,path,expected_gesture,media_type,dataset,condition,distance,"
+                "start_frame,end_frame",
+                "s1,clip.avi,WAVE_LR,video,ipn_hand,stable,unknown,120,160",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    samples = read_manifest(manifest_path)
+
+    assert samples[0].path == video_path
+    assert samples[0].start_frame == 120
+    assert samples[0].end_frame == 160
+
+
 def test_infer_media_type_uses_known_extensions() -> None:
     assert infer_media_type(Path("frame.png")) == "image"
     assert infer_media_type(Path("clip.mp4")) == "video"

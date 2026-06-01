@@ -75,6 +75,21 @@ python scripts/build_manifest.py `
   --distance 1m
 ```
 
+Реальний IPN Hand benchmark після завантаження датасету:
+
+```powershell
+python scripts/download_ipn_hand.py
+
+python scripts/build_ipn_manifest.py `
+  --annotations data/external/ipn_hand/annotations `
+  --videos data/external/ipn_hand/videos `
+  --output data/processed/benchmark_inputs/ipn_hand_manifest.csv `
+  --split test `
+  --labels D0X G05 G06 G10 `
+  --include-unknown `
+  --limit-per-class 30
+```
+
 Побудова `predictions.csv`:
 
 ```powershell

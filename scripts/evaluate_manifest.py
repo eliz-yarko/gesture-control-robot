@@ -132,7 +132,12 @@ class SampleEvaluator:
                 if not success:
                     break
                 decoded_frames += 1
-                if (decoded_frames - 1) % self._frame_stride != 0:
+                if sample.start_frame is not None and decoded_frames < sample.start_frame:
+                    continue
+                if sample.end_frame is not None and decoded_frames > sample.end_frame:
+                    break
+                segment_start = sample.start_frame or 1
+                if (decoded_frames - segment_start) % self._frame_stride != 0:
                     continue
 
                 frame = self._prepare_video_frame(frame)

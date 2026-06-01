@@ -85,3 +85,41 @@ Supported manifest presets:
 - `hagrid` / `hagrid_v2` for static gesture subsets.
 - `jester` for selected dynamic gesture folders.
 - `ipn_hand` for selected IPN Hand classes such as `G05`, `G06`, and `G10`.
+
+## IPN Hand dataset
+
+The IPN Hand dataset is stored locally under:
+
+```text
+data/external/ipn_hand/
++-- annotations/
++-- archives/
++-- videos/
+```
+
+The full video download contains 200 `.avi` files in five `.tgz` archives. Because IPN Hand
+videos are continuous streams, benchmark rows should use annotation segments rather than whole
+videos. Download and extract the dataset with:
+
+```powershell
+python scripts/download_ipn_hand.py
+```
+
+Build a segment-level manifest with:
+
+```powershell
+python scripts/build_ipn_manifest.py `
+  --annotations data/external/ipn_hand/annotations `
+  --videos data/external/ipn_hand/videos `
+  --output data/processed/benchmark_inputs/ipn_hand_manifest.csv `
+  --split test `
+  --labels D0X G05 G06 G10 `
+  --include-unknown `
+  --limit-per-class 30
+```
+
+Mapping used for the diploma benchmark:
+
+- `G05` and `G06` -> `WAVE_LR`
+- `G10` -> `PULL_TOWARD`
+- `D0X` -> `UNKNOWN` for false-positive analysis

@@ -41,6 +41,8 @@ class EvaluationSample:
     dataset: str = ""
     condition: str = ""
     distance: str = ""
+    start_frame: int | None = None
+    end_frame: int | None = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,8 @@ def read_manifest(path: Path) -> list[EvaluationSample]:
         ``path`` and ``expected_gesture``.
 
     Optional columns:
-        ``sample_id``, ``media_type``, ``dataset``, ``condition``, and ``distance``.
+        ``sample_id``, ``media_type``, ``dataset``, ``condition``, ``distance``,
+        ``start_frame``, and ``end_frame``.
     """
 
     base_dir = path.parent
@@ -124,6 +127,8 @@ def _sample_from_row(
         dataset=(row.get("dataset") or "").strip(),
         condition=(row.get("condition") or "").strip(),
         distance=(row.get("distance") or "").strip(),
+        start_frame=_optional_positive_int(row.get("start_frame")),
+        end_frame=_optional_positive_int(row.get("end_frame")),
     )
 
 
@@ -150,6 +155,15 @@ def _record_to_row(record: PredictionRecord) -> dict[str, object]:
         "frame_count": record.frame_count,
         "note": record.note,
     }
+
+
+def _optional_positive_int(value: str | None) -> int | None:
+    if value is None or not value.strip():
+        return None
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError("Frame boundaries must be positive integers")
+    return parsed
 
 
 def _empty_if_none(value: float | None) -> float | str:

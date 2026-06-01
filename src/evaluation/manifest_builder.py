@@ -126,6 +126,8 @@ class ManifestRow:
     dataset: str
     condition: str
     distance: str
+    start_frame: int | None = None
+    end_frame: int | None = None
 
 
 @dataclass(frozen=True)
@@ -232,6 +234,8 @@ def write_manifest(output_path: Path, rows: Sequence[ManifestRow]) -> None:
                 "dataset",
                 "condition",
                 "distance",
+                "start_frame",
+                "end_frame",
             ),
         )
         writer.writeheader()
@@ -245,6 +249,8 @@ def write_manifest(output_path: Path, rows: Sequence[ManifestRow]) -> None:
                     "dataset": row.dataset,
                     "condition": row.condition,
                     "distance": row.distance,
+                    "start_frame": _empty_if_none(row.start_frame),
+                    "end_frame": _empty_if_none(row.end_frame),
                 }
             )
 
@@ -335,3 +341,7 @@ def summarize_counts(counts_by_gesture: Mapping[str, int]) -> str:
         return "no samples"
     parts = [f"{label}={count}" for label, count in sorted(counts_by_gesture.items())]
     return ", ".join(parts)
+
+
+def _empty_if_none(value: int | None) -> int | str:
+    return "" if value is None else value

@@ -1,0 +1,199 @@
+group,expected_label,predicted_label,count
+ipn_hand / stable+plain+static / video,UNKNOWN,UNKNOWN,7
+ipn_hand / stable+plain+static / video,UNKNOWN,OPEN_PALM,3
+ipn_hand / stable+plain+static / video,UNKNOWN,FIST,1
+ipn_hand / stable+plain+static / video,UNKNOWN,THUMB_UP,5
+ipn_hand / stable+plain+static / video,UNKNOWN,PEACE,4
+ipn_hand / stable+plain+static / video,UNKNOWN,WAVE_LR,0
+ipn_hand / stable+plain+static / video,UNKNOWN,CIRCLE,0
+ipn_hand / stable+plain+static / video,UNKNOWN,PULL_TOWARD,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,UNKNOWN,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,FIST,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,THUMB_UP,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,PEACE,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,WAVE_LR,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,CIRCLE,0
+ipn_hand / stable+plain+static / video,OPEN_PALM,PULL_TOWARD,0
+ipn_hand / stable+plain+static / video,FIST,UNKNOWN,0
+ipn_hand / stable+plain+static / video,FIST,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,FIST,FIST,0
+ipn_hand / stable+plain+static / video,FIST,THUMB_UP,0
+ipn_hand / stable+plain+static / video,FIST,PEACE,0
+ipn_hand / stable+plain+static / video,FIST,WAVE_LR,0
+ipn_hand / stable+plain+static / video,FIST,CIRCLE,0
+ipn_hand / stable+plain+static / video,FIST,PULL_TOWARD,0
+ipn_hand / stable+plain+static / video,THUMB_UP,UNKNOWN,0
+ipn_hand / stable+plain+static / video,THUMB_UP,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,THUMB_UP,FIST,0
+ipn_hand / stable+plain+static / video,THUMB_UP,THUMB_UP,0
+ipn_hand / stable+plain+static / video,THUMB_UP,PEACE,0
+ipn_hand / stable+plain+static / video,THUMB_UP,WAVE_LR,0
+ipn_hand / stable+plain+static / video,THUMB_UP,CIRCLE,0
+ipn_hand / stable+plain+static / video,THUMB_UP,PULL_TOWARD,0
+ipn_hand / stable+plain+static / video,PEACE,UNKNOWN,0
+ipn_hand / stable+plain+static / video,PEACE,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,PEACE,FIST,0
+ipn_hand / stable+plain+static / video,PEACE,THUMB_UP,0
+ipn_hand / stable+plain+static / video,PEACE,PEACE,0
+ipn_hand / stable+plain+static / video,PEACE,WAVE_LR,0
+ipn_hand / stable+plain+static / video,PEACE,CIRCLE,0
+ipn_hand / stable+plain+static / video,PEACE,PULL_TOWARD,0
+ipn_hand / stable+plain+static / video,WAVE_LR,UNKNOWN,1
+ipn_hand / stable+plain+static / video,WAVE_LR,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,WAVE_LR,FIST,0
+ipn_hand / stable+plain+static / video,WAVE_LR,THUMB_UP,0
+ipn_hand / stable+plain+static / video,WAVE_LR,PEACE,0
+ipn_hand / stable+plain+static / video,WAVE_LR,WAVE_LR,6
+ipn_hand / stable+plain+static / video,WAVE_LR,CIRCLE,0
+ipn_hand / stable+plain+static / video,WAVE_LR,PULL_TOWARD,1
+ipn_hand / stable+plain+static / video,CIRCLE,UNKNOWN,0
+ipn_hand / stable+plain+static / video,CIRCLE,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,CIRCLE,FIST,0
+ipn_hand / stable+plain+static / video,CIRCLE,THUMB_UP,0
+ipn_hand / stable+plain+static / video,CIRCLE,PEACE,0
+ipn_hand / stable+plain+static / video,CIRCLE,WAVE_LR,0
+ipn_hand / stable+plain+static / video,CIRCLE,CIRCLE,0
+ipn_hand / stable+plain+static / video,CIRCLE,PULL_TOWARD,0
+ipn_hand / stable+plain+static / video,PULL_TOWARD,UNKNOWN,5
+ipn_hand / stable+plain+static / video,PULL_TOWARD,OPEN_PALM,0
+ipn_hand / stable+plain+static / video,PULL_TOWARD,FIST,0
+ipn_hand / stable+plain+static / video,PULL_TOWARD,THUMB_UP,0
+ipn_hand / stable+plain+static / video,PULL_TOWARD,PEACE,0
+ipn_hand / stable+plain+static / video,PULL_TOWARD,WAVE_LR,2
+ipn_hand / stable+plain+static / video,PULL_TOWARD,CIRCLE,3
+ipn_hand / stable+plain+static / video,PULL_TOWARD,PULL_TOWARD,2
+ipn_hand / stable+clutter+static / video,UNKNOWN,UNKNOWN,0
+ipn_hand / stable+clutter+static / video,UNKNOWN,OPEN_PALM,1
+ipn_hand / stable+clutter+static / video,UNKNOWN,FIST,3
+ipn_hand / stable+clutter+static / video,UNKNOWN,THUMB_UP,6
+ipn_hand / stable+clutter+static / video,UNKNOWN,WAVE_LR,0
+ipn_hand / stable+clutter+static / video,UNKNOWN,CIRCLE,0
+ipn_hand / stable+clutter+static / video,UNKNOWN,PULL_TOWARD,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,UNKNOWN,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,OPEN_PALM,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,FIST,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,THUMB_UP,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,WAVE_LR,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,CIRCLE,0
+ipn_hand / stable+clutter+static / video,OPEN_PALM,PULL_TOWARD,0
+ipn_hand / stable+clutter+static / video,FIST,UNKNOWN,0
+ipn_hand / stable+clutter+static / video,FIST,OPEN_PALM,0
+ipn_hand / stable+clutter+static / video,FIST,FIST,0
+ipn_hand / stable+clutter+static / video,FIST,THUMB_UP,0
+ipn_hand / stable+clutter+static / video,FIST,WAVE_LR,0
+ipn_hand / stable+clutter+static / video,FIST,CIRCLE,0
+ipn_hand / stable+clutter+static / video,FIST,PULL_TOWARD,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,UNKNOWN,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,OPEN_PALM,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,FIST,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,THUMB_UP,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,WAVE_LR,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,CIRCLE,0
+ipn_hand / stable+clutter+static / video,THUMB_UP,PULL_TOWARD,0
+ipn_hand / stable+clutter+static / video,WAVE_LR,UNKNOWN,7
+ipn_hand / stable+clutter+static / video,WAVE_LR,OPEN_PALM,0
+ipn_hand / stable+clutter+static / video,WAVE_LR,FIST,0
+ipn_hand / stable+clutter+static / video,WAVE_LR,THUMB_UP,0
+ipn_hand / stable+clutter+static / video,WAVE_LR,WAVE_LR,3
+ipn_hand / stable+clutter+static / video,WAVE_LR,CIRCLE,2
+ipn_hand / stable+clutter+static / video,WAVE_LR,PULL_TOWARD,2
+ipn_hand / stable+clutter+static / video,CIRCLE,UNKNOWN,0
+ipn_hand / stable+clutter+static / video,CIRCLE,OPEN_PALM,0
+ipn_hand / stable+clutter+static / video,CIRCLE,FIST,0
+ipn_hand / stable+clutter+static / video,CIRCLE,THUMB_UP,0
+ipn_hand / stable+clutter+static / video,CIRCLE,WAVE_LR,0
+ipn_hand / stable+clutter+static / video,CIRCLE,CIRCLE,0
+ipn_hand / stable+clutter+static / video,CIRCLE,PULL_TOWARD,0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,UNKNOWN,7
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,OPEN_PALM,0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,FIST,0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,THUMB_UP,0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,WAVE_LR,0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,CIRCLE,0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,PULL_TOWARD,4
+ipn_hand / dark+clutter+static / video,UNKNOWN,UNKNOWN,0
+ipn_hand / dark+clutter+static / video,UNKNOWN,WAVE_LR,0
+ipn_hand / dark+clutter+static / video,UNKNOWN,PULL_TOWARD,0
+ipn_hand / dark+clutter+static / video,WAVE_LR,UNKNOWN,1
+ipn_hand / dark+clutter+static / video,WAVE_LR,WAVE_LR,7
+ipn_hand / dark+clutter+static / video,WAVE_LR,PULL_TOWARD,0
+ipn_hand / dark+clutter+static / video,PULL_TOWARD,UNKNOWN,4
+ipn_hand / dark+clutter+static / video,PULL_TOWARD,WAVE_LR,0
+ipn_hand / dark+clutter+static / video,PULL_TOWARD,PULL_TOWARD,0
+ipn_hand / stable+clutter+dynamic / video,CIRCLE,CIRCLE,0
+ipn_hand / stable+clutter+dynamic / video,CIRCLE,PULL_TOWARD,0
+ipn_hand / stable+clutter+dynamic / video,PULL_TOWARD,CIRCLE,1
+ipn_hand / stable+clutter+dynamic / video,PULL_TOWARD,PULL_TOWARD,0
+ipn_hand / light+clutter+dynamic / video,CIRCLE,CIRCLE,0
+ipn_hand / light+clutter+dynamic / video,CIRCLE,PULL_TOWARD,0
+ipn_hand / light+clutter+dynamic / video,PULL_TOWARD,CIRCLE,1
+ipn_hand / light+clutter+dynamic / video,PULL_TOWARD,PULL_TOWARD,0
+ipn_hand / light+clutter+static / video,UNKNOWN,UNKNOWN,0
+ipn_hand / light+clutter+static / video,UNKNOWN,PULL_TOWARD,0
+ipn_hand / light+clutter+static / video,PULL_TOWARD,UNKNOWN,1
+ipn_hand / light+clutter+static / video,PULL_TOWARD,PULL_TOWARD,0
+ALL,UNKNOWN,UNKNOWN,7
+ALL,UNKNOWN,OPEN_PALM,4
+ALL,UNKNOWN,FIST,4
+ALL,UNKNOWN,THUMB_UP,11
+ALL,UNKNOWN,PEACE,4
+ALL,UNKNOWN,WAVE_LR,0
+ALL,UNKNOWN,CIRCLE,0
+ALL,UNKNOWN,PULL_TOWARD,0
+ALL,OPEN_PALM,UNKNOWN,0
+ALL,OPEN_PALM,OPEN_PALM,0
+ALL,OPEN_PALM,FIST,0
+ALL,OPEN_PALM,THUMB_UP,0
+ALL,OPEN_PALM,PEACE,0
+ALL,OPEN_PALM,WAVE_LR,0
+ALL,OPEN_PALM,CIRCLE,0
+ALL,OPEN_PALM,PULL_TOWARD,0
+ALL,FIST,UNKNOWN,0
+ALL,FIST,OPEN_PALM,0
+ALL,FIST,FIST,0
+ALL,FIST,THUMB_UP,0
+ALL,FIST,PEACE,0
+ALL,FIST,WAVE_LR,0
+ALL,FIST,CIRCLE,0
+ALL,FIST,PULL_TOWARD,0
+ALL,THUMB_UP,UNKNOWN,0
+ALL,THUMB_UP,OPEN_PALM,0
+ALL,THUMB_UP,FIST,0
+ALL,THUMB_UP,THUMB_UP,0
+ALL,THUMB_UP,PEACE,0
+ALL,THUMB_UP,WAVE_LR,0
+ALL,THUMB_UP,CIRCLE,0
+ALL,THUMB_UP,PULL_TOWARD,0
+ALL,PEACE,UNKNOWN,0
+ALL,PEACE,OPEN_PALM,0
+ALL,PEACE,FIST,0
+ALL,PEACE,THUMB_UP,0
+ALL,PEACE,PEACE,0
+ALL,PEACE,WAVE_LR,0
+ALL,PEACE,CIRCLE,0
+ALL,PEACE,PULL_TOWARD,0
+ALL,WAVE_LR,UNKNOWN,9
+ALL,WAVE_LR,OPEN_PALM,0
+ALL,WAVE_LR,FIST,0
+ALL,WAVE_LR,THUMB_UP,0
+ALL,WAVE_LR,PEACE,0
+ALL,WAVE_LR,WAVE_LR,16
+ALL,WAVE_LR,CIRCLE,2
+ALL,WAVE_LR,PULL_TOWARD,3
+ALL,CIRCLE,UNKNOWN,0
+ALL,CIRCLE,OPEN_PALM,0
+ALL,CIRCLE,FIST,0
+ALL,CIRCLE,THUMB_UP,0
+ALL,CIRCLE,PEACE,0
+ALL,CIRCLE,WAVE_LR,0
+ALL,CIRCLE,CIRCLE,0
+ALL,CIRCLE,PULL_TOWARD,0
+ALL,PULL_TOWARD,UNKNOWN,17
+ALL,PULL_TOWARD,OPEN_PALM,0
+ALL,PULL_TOWARD,FIST,0
+ALL,PULL_TOWARD,THUMB_UP,0
+ALL,PULL_TOWARD,PEACE,0
+ALL,PULL_TOWARD,WAVE_LR,2
+ALL,PULL_TOWARD,CIRCLE,5
+ALL,PULL_TOWARD,PULL_TOWARD,6
