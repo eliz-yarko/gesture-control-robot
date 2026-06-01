@@ -26,6 +26,9 @@ AGENTS.md
 Thumbs.db
 
 # Large data and generated models
+data/external/
+data/raw/
+data/processed/
 data/test_scenarios/*.mp4
 data/test_scenarios/*.avi
 data/user_profiles/*.json
@@ -34,5 +37,6 @@ models/*.pkl
 
 # Output
 *.log
+*.docx
 docs/thesis/figures/*.png
 !docs/thesis/figures/.gitkeep

@@ -50,6 +50,42 @@ python scripts/calibrate_user.py --user-id operator_01 --camera 0 --samples 5
 python -m src.main --camera 0 --debug --visualize --calibration-profile data/user_profiles/operator_01.json
 ```
 
+## Benchmark
+
+Для оцінювання на subset-ах відкритих датасетів використовується manifest CSV:
+
+```csv
+sample_id,path,expected_gesture,media_type,dataset,condition,distance
+hagrid_001,../external/hagrid_v2/stop/001.jpg,OPEN_PALM,image,hagrid_v2,normal,1m
+jester_001,../external/jester/pulling_hand_in/001.mp4,PULL_TOWARD,video,jester,normal,1m
+circle_001,../processed/landmarks/circle_001.json,CIRCLE,landmarks,own_control,normal,1m
+```
+
+Побудова `predictions.csv`:
+
+```powershell
+python scripts/evaluate_manifest.py `
+  --manifest data/processed/benchmark_inputs/manifest.csv `
+  --output data/processed/benchmark_inputs/predictions.csv `
+  --classifier-mode auto `
+  --frame-stride 2 `
+  --max-frames 90 `
+  --continue-on-error
+```
+
+Підрахунок метрик і графіків:
+
+```powershell
+python scripts/benchmark.py `
+  --input data/processed/benchmark_inputs/predictions.csv `
+  --output data/benchmarks/results.csv `
+  --group-by dataset condition distance
+
+python scripts/plot_results.py `
+  --input data/benchmarks/results.csv `
+  --output docs/thesis/figures/
+```
+
 ## Структура
 
 - `src/` — код підсистеми жестового керування.
