@@ -61,6 +61,20 @@ jester_001,../external/jester/pulling_hand_in/001.mp4,PULL_TOWARD,video,jester,n
 circle_001,../processed/landmarks/circle_001.json,CIRCLE,landmarks,own_control,normal,1m
 ```
 
+Швидкий варіант для власного контрольного набору:
+
+```powershell
+python scripts/record_test_video.py --gesture OPEN_PALM --seconds 3
+python scripts/record_test_video.py --gesture PULL_TOWARD --seconds 4
+
+python scripts/build_manifest.py `
+  --input data/external/own_control `
+  --dataset own_control `
+  --output data/processed/benchmark_inputs/manifest.csv `
+  --condition normal `
+  --distance 1m
+```
+
 Побудова `predictions.csv`:
 
 ```powershell

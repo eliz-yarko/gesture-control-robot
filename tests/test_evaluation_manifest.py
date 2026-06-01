@@ -3,7 +3,13 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from src.evaluation import PredictionRecord, infer_media_type, read_manifest
+from src.evaluation import (
+    PredictionRecord,
+    build_manifest_from_directory,
+    infer_media_type,
+    read_manifest,
+    summarize_counts,
+)
 from src.evaluation.manifest import write_prediction_records
 
 
@@ -79,3 +85,51 @@ def test_write_prediction_records_matches_benchmark_input_schema(tmp_path: Path)
             "note": "",
         }
     ]
+
+
+def test_build_manifest_from_directory_maps_hagrid_subset(tmp_path: Path) -> None:
+    input_dir = tmp_path / "external" / "hagrid_v2"
+    (input_dir / "fist").mkdir(parents=True)
+    (input_dir / "peace").mkdir()
+    (input_dir / "point").mkdir()
+    (input_dir / "fist" / "001.jpg").write_text("placeholder", encoding="utf-8")
+    (input_dir / "fist" / "002.jpg").write_text("placeholder", encoding="utf-8")
+    (input_dir / "peace" / "001.png").write_text("placeholder", encoding="utf-8")
+    (input_dir / "point" / "001.jpg").write_text("placeholder", encoding="utf-8")
+    output_path = tmp_path / "processed" / "manifest.csv"
+
+    result = build_manifest_from_directory(
+        input_dir=input_dir,
+        output_path=output_path,
+        dataset="hagrid_v2",
+        condition="normal",
+        distance="1m",
+        limit_per_class=1,
+    )
+
+    assert len(result.rows) == 2
+    assert result.counts_by_gesture == {"FIST": 1, "PEACE": 1}
+    assert result.skipped_files == 1
+
+    samples = read_manifest(output_path)
+    assert [sample.expected_gesture for sample in samples] == ["FIST", "PEACE"]
+    assert samples[0].dataset == "hagrid_v2"
+    assert samples[0].media_type == "image"
+
+
+def test_build_manifest_can_include_unknown_samples(tmp_path: Path) -> None:
+    input_dir = tmp_path / "own_control"
+    (input_dir / "unknown").mkdir(parents=True)
+    (input_dir / "pull_toward").mkdir()
+    (input_dir / "unknown" / "idle.mp4").write_text("placeholder", encoding="utf-8")
+    (input_dir / "pull_toward" / "pull.mp4").write_text("placeholder", encoding="utf-8")
+
+    result = build_manifest_from_directory(
+        input_dir=input_dir,
+        output_path=tmp_path / "manifest.csv",
+        dataset="own_control",
+        include_unknown=True,
+    )
+
+    assert result.counts_by_gesture == {"PULL_TOWARD": 1, "UNKNOWN": 1}
+    assert summarize_counts(result.counts_by_gesture) == "PULL_TOWARD=1, UNKNOWN=1"

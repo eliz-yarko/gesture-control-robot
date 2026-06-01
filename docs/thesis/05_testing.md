@@ -53,9 +53,13 @@ matrix. Для візуалізації результатів використ�
 
 Щоб перетворити subset датасету у такий CSV, використовується `scripts/evaluate_manifest.py`.
 Вхідним файлом є manifest з колонками `path`, `expected_gesture`, `media_type`, `dataset`,
-`condition` і `distance`. Скрипт підтримує зображення, відео та JSON-файли з послідовностями
-MediaPipe landmarks, тому один формат може використовуватися для HaGRIDv2, Jester, IPN Hand
-і малого контрольного набору.
+`condition` і `distance`. Для зменшення ручної роботи додано `scripts/build_manifest.py`, який
+сканує локальні class-named директорії та формує manifest для `own_control`, HaGRID/HaGRIDv2,
+Jester або IPN Hand. Для швидкого збирання малого контрольного набору передбачено
+`scripts/record_test_video.py`, який записує короткі кліпи у `data/external/own_control/`.
+Скрипт оцінювання підтримує зображення, відео та JSON-файли з послідовностями MediaPipe
+landmarks, тому один формат може використовуватися для HaGRIDv2, Jester, IPN Hand і малого
+контрольного набору.
 
 ## 5.4 Обмеження експерименту
 
