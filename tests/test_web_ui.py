@@ -59,3 +59,16 @@ def test_dashboard_frontend_contains_demo_mode_assets() -> None:
     assert "DEMO_SEQUENCE" in APP_JS
     assert "GESTURE_COMMANDS" in APP_JS
     assert "demo-frame" in STYLES_CSS
+
+
+def test_dashboard_frontend_contains_browser_camera_assets() -> None:
+    assert "apiBaseInput" in INDEX_HTML
+    assert "browserCameraToggle" in INDEX_HTML
+    assert "browserVideo" in INDEX_HTML
+    assert "captureCanvas" in INDEX_HTML
+    assert "getUserMedia" in APP_JS
+    assert "api/frame" in APP_JS
+    assert "browserCameraMode" in APP_JS
+    assert "api-input" in STYLES_CSS
+    assert "browser-active" in STYLES_CSS
+    assert "browser-video" in STYLES_CSS

@@ -95,6 +95,18 @@ python -m src.web_ui `
   --dynamic-model models/dynamic_gesture_classifier.joblib
 ```
 
+Режим browser camera + backend:
+
+```powershell
+python -m src.web_ui `
+  --input-mode browser-camera `
+  --host 127.0.0.1 `
+  --port 8000 `
+  --static-model models/static_gesture_classifier.joblib `
+  --dynamic-model models/dynamic_gesture_classifier.joblib `
+  --cors-origin "*"
+```
+
 Статичний demo-frontend для безкоштовного хостингу:
 
 ```powershell

@@ -14,11 +14,27 @@
         <p id="sourceLine">camera:0</p>
       </div>
       <div class="topbar-actions">
+        <input
+          id="apiBaseInput"
+          class="api-input"
+          type="url"
+          inputmode="url"
+          placeholder="Backend URL"
+          aria-label="Backend URL"
+        >
         <div class="state-strip">
           <span id="stateBadge" class="badge badge-muted">starting</span>
           <span id="transportBadge" class="badge">mock</span>
         </div>
         <div class="button-row">
+          <button
+            id="browserCameraToggle"
+            class="icon-button"
+            type="button"
+            title="Use this browser camera"
+          >
+            Camera
+          </button>
           <button id="demoToggle" class="icon-button" type="button" title="Toggle demo data">
             Demo
           </button>
@@ -33,6 +49,8 @@
       <section class="video-panel" aria-label="Recognition stream">
         <div class="video-stage">
           <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
+          <video id="browserVideo" class="browser-video" autoplay playsinline muted hidden></video>
+          <canvas id="captureCanvas" hidden></canvas>
           <div id="demoFrame" class="demo-frame" hidden>
             <div class="demo-hand" aria-hidden="true">
               <span class="finger finger-thumb"></span>

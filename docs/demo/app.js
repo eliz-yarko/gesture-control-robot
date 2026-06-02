@@ -1,7 +1,8 @@
 
 const $ = (id) => document.getElementById(id);
 
-const API_BASE = window.GESTURE_API_BASE || "";
+const queryParams = new URLSearchParams(window.location.search);
+let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
 const DEMO_SEQUENCE = [
   ["OPEN_PALM", "STOP", 0.96, "OPEN_PALM", "UNKNOWN"],
   ["FIST", "FORWARD", 0.91, "FIST", "UNKNOWN"],
@@ -29,9 +30,13 @@ const GESTURE_COMMANDS = [
 ];
 
 let demoMode = false;
+let browserCameraMode = false;
 let demoIndex = 0;
 let commandCache = [];
 let lastBackendOk = true;
+let browserStream = null;
+let frameTimer = null;
+let frameInFlight = false;
 
 function text(id, value) {
   const node = $(id);
@@ -55,25 +60,17 @@ function setStateBadge(state) {
   else badge.classList.add("badge-muted");
 }
 
-function setDemoMode(enabled) {
-  demoMode = enabled;
-  const button = $("demoToggle");
-  if (button) button.classList.toggle("active", demoMode);
-  const stage = document.querySelector(".video-stage");
-  if (stage) stage.classList.toggle("demo-active", demoMode);
-  const demoFrame = $("demoFrame");
-  if (demoFrame) demoFrame.hidden = !demoMode;
-  if (demoMode) {
-    applyDemoStatus();
-    renderCommands(commandCache);
-  } else {
-    reloadStream();
-  }
+function buildUrl(path) {
+  const prefix = apiBase.replace(/\/$/, "");
+  return `${prefix}/${path.replace(/^\//, "")}`;
 }
 
-function buildUrl(path) {
-  const prefix = API_BASE.replace(/\/$/, "");
-  return `${prefix}/${path.replace(/^\//, "")}`;
+function syncApiBaseFromInput() {
+  const input = $("apiBaseInput");
+  if (!input) return;
+  apiBase = input.value.trim();
+  if (apiBase) window.localStorage.setItem("gestureApiBase", apiBase);
+  else window.localStorage.removeItem("gestureApiBase");
 }
 
 function escapeHtml(value) {
@@ -150,6 +147,23 @@ function demoStatus() {
   };
 }
 
+function setDemoMode(enabled) {
+  if (enabled && browserCameraMode) stopBrowserCamera();
+  demoMode = enabled;
+  const button = $("demoToggle");
+  if (button) button.classList.toggle("active", demoMode);
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.toggle("demo-active", demoMode);
+  const demoFrame = $("demoFrame");
+  if (demoFrame) demoFrame.hidden = !demoMode;
+  if (demoMode) {
+    applyDemoStatus();
+    renderCommands(commandCache);
+  } else {
+    reloadStream();
+  }
+}
+
 function applyDemoStatus() {
   const status = demoStatus();
   applyStatus(status);
@@ -173,7 +187,7 @@ function reloadStream() {
 }
 
 async function refreshStatus() {
-  if (demoMode) return;
+  if (demoMode || browserCameraMode) return;
   try {
     const response = await fetch(buildUrl("api/status"), { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -198,6 +212,99 @@ async function refreshCommands() {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   commandCache = await response.json();
   renderCommands(commandCache);
+}
+
+async function startBrowserCamera() {
+  setDemoMode(false);
+  syncApiBaseFromInput();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showRuntimeError("Browser camera API is unavailable on this page.");
+    return;
+  }
+  try {
+    browserStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: "user",
+      },
+      audio: false,
+    });
+    const video = $("browserVideo");
+    if (!video) return;
+    video.srcObject = browserStream;
+    await video.play();
+    browserCameraMode = true;
+    const button = $("browserCameraToggle");
+    if (button) button.classList.add("active");
+    const stage = document.querySelector(".video-stage");
+    if (stage) stage.classList.add("browser-active");
+    video.hidden = false;
+    const demoFrame = $("demoFrame");
+    if (demoFrame) demoFrame.hidden = true;
+    setStateBadge("camera");
+    text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
+    frameTimer = window.setInterval(captureAndSendFrame, 220);
+  } catch (error) {
+    showRuntimeError(error.message);
+  }
+}
+
+function stopBrowserCamera() {
+  browserCameraMode = false;
+  if (frameTimer !== null) {
+    window.clearInterval(frameTimer);
+    frameTimer = null;
+  }
+  if (browserStream) {
+    for (const track of browserStream.getTracks()) track.stop();
+    browserStream = null;
+  }
+  const video = $("browserVideo");
+  if (video) {
+    video.pause();
+    video.srcObject = null;
+    video.hidden = true;
+  }
+  const button = $("browserCameraToggle");
+  if (button) button.classList.remove("active");
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.remove("browser-active");
+  reloadStream();
+}
+
+async function captureAndSendFrame() {
+  if (!browserCameraMode || frameInFlight) return;
+  const video = $("browserVideo");
+  const canvas = $("captureCanvas");
+  if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
+  frameInFlight = true;
+  try {
+    const width = 480;
+    const height = Math.max(1, Math.round(width * (video.videoHeight / video.videoWidth)));
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas capture context is unavailable.");
+    context.drawImage(video, 0, 0, width, height);
+    const image = canvas.toDataURL("image/jpeg", 0.72);
+    const response = await fetch(buildUrl("api/frame"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image }),
+    });
+    if (!response.ok) throw new Error(`Frame API HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload.status) applyStatus(payload.status);
+    if (payload.commands) {
+      commandCache = payload.commands;
+      renderCommands(commandCache);
+    }
+  } catch (error) {
+    showRuntimeError(error.message);
+  } finally {
+    frameInFlight = false;
+  }
 }
 
 function renderCommands(commands) {
@@ -229,7 +336,27 @@ function renderGestureMap(activeGesture = "UNKNOWN") {
   `).join("");
 }
 
+function showRuntimeError(message) {
+  setStateBadge(browserCameraMode ? "camera" : "error");
+  const errorPanel = $("errorPanel");
+  if (errorPanel) errorPanel.hidden = false;
+  text("errorText", message);
+}
+
 function bindControls() {
+  const apiInput = $("apiBaseInput");
+  if (apiInput) {
+    apiInput.value = apiBase || window.localStorage.getItem("gestureApiBase") || "";
+    apiBase = apiInput.value.trim();
+    apiInput.addEventListener("change", syncApiBaseFromInput);
+  }
+  const cameraButton = $("browserCameraToggle");
+  if (cameraButton) {
+    cameraButton.addEventListener("click", () => {
+      if (browserCameraMode) stopBrowserCamera();
+      else startBrowserCamera();
+    });
+  }
   const demoButton = $("demoToggle");
   if (demoButton) demoButton.addEventListener("click", () => setDemoMode(!demoMode));
   const reloadButton = $("reloadButton");
@@ -239,11 +366,11 @@ function bindControls() {
 bindControls();
 renderGestureMap();
 refreshStatus();
-refreshCommands();
+refreshCommands().catch(() => undefined);
 setInterval(refreshStatus, 500);
 setInterval(() => {
   if (demoMode) applyDemoStatus();
 }, 1300);
 setInterval(() => {
-  if (!demoMode) refreshCommands().catch(() => undefined);
+  if (!demoMode && !browserCameraMode) refreshCommands().catch(() => undefined);
 }, 1000);

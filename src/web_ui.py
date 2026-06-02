@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import importlib
 import json
 import logging
@@ -19,7 +21,7 @@ from time import perf_counter
 from typing import Any, cast
 from urllib.parse import urlparse
 
-from src.capture.video_capture import VideoCapture
+from src.capture.video_capture import CapturedFrame, VideoCapture
 from src.config import AppConfig, VideoConfig
 from src.domain import CommandEvent, GestureID, RobotCommand
 from src.pipeline import GestureControlPipeline, PipelineResult
@@ -258,6 +260,123 @@ class DashboardState:
         return perf_counter() - self._started_at
 
 
+class BrowserFrameProcessor:
+    """Process frames uploaded by the browser camera mode."""
+
+    def __init__(
+        self,
+        state: DashboardState,
+        config: AppConfig,
+        sender: CommandSender,
+        jpeg_quality: int,
+        static_model: str | None = None,
+        dynamic_model: str | None = None,
+    ) -> None:
+        """Initialize decoder, pipeline, and per-session timing state."""
+
+        self._state = state
+        self._config = config
+        self._sender = sender
+        self._jpeg_quality = jpeg_quality
+        self._cv2 = importlib.import_module("cv2")
+        self._numpy = importlib.import_module("numpy")
+        self._pipeline = _build_pipeline(
+            config=config,
+            sender=sender,
+            static_model=static_model,
+            dynamic_model=dynamic_model,
+        )
+        self._lock = threading.Lock()
+        self._frame_index = 0
+        self._last_frame_at: float | None = None
+        self._smoothed_fps: float | None = None
+
+    def process_payload(self, payload: dict[str, object]) -> dict[str, object]:
+        """Process one JSON frame payload and return updated dashboard data."""
+
+        image_value = payload.get("image")
+        if not isinstance(image_value, str) or not image_value:
+            raise ValueError("Frame payload must contain a non-empty 'image' string.")
+
+        with self._lock:
+            bgr_frame = self._decode_frame(image_value)
+            frame = self._captured_frame_from_bgr(bgr_frame)
+            started_at = perf_counter()
+            result = self._pipeline.process(frame)
+            latency_ms = (perf_counter() - started_at) * 1000
+            now = perf_counter()
+            if self._last_frame_at is not None:
+                instant_fps = 1.0 / max(now - self._last_frame_at, 1e-6)
+                self._smoothed_fps = (
+                    instant_fps
+                    if self._smoothed_fps is None
+                    else (self._smoothed_fps * 0.85) + (instant_fps * 0.15)
+                )
+            self._last_frame_at = now
+            display_fps = self._smoothed_fps if self._smoothed_fps is not None else 0.0
+            annotated = _annotate_frame(
+                cv2=self._cv2,
+                frame=frame.bgr_frame,
+                result=result,
+                latency_ms=latency_ms,
+                fps=display_fps,
+            )
+            success, encoded = self._cv2.imencode(
+                ".jpg",
+                annotated,
+                [int(self._cv2.IMWRITE_JPEG_QUALITY), self._jpeg_quality],
+            )
+            if not success:
+                raise RuntimeError("Cannot encode processed browser frame.")
+
+            self._state.update_frame(
+                result=result,
+                latency_ms=latency_ms,
+                fps=display_fps,
+                jpeg_bytes=bytes(encoded),
+            )
+            return {
+                "status": self._state.status_payload(),
+                "commands": self._state.command_payload(),
+            }
+
+    def close(self) -> None:
+        """Release pipeline resources."""
+
+        self._pipeline.close()
+        if isinstance(self._sender, SerialCommandSender):
+            self._sender.close()
+
+    def _decode_frame(self, image_value: str) -> Any:
+        if "," in image_value and image_value.lstrip().startswith("data:"):
+            _header, image_value = image_value.split(",", 1)
+        try:
+            image_bytes = base64.b64decode(image_value, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("Frame image must be valid base64 data.") from exc
+
+        array = self._numpy.frombuffer(image_bytes, dtype=self._numpy.uint8)
+        frame = self._cv2.imdecode(array, self._cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("Frame image could not be decoded by OpenCV.")
+        return frame
+
+    def _captured_frame_from_bgr(self, frame: Any) -> CapturedFrame:
+        resized = self._cv2.resize(
+            frame,
+            (self._config.video.frame_width, self._config.video.frame_height),
+        )
+        bgr_frame = self._cv2.flip(resized, 1) if self._config.video.mirror_frame else resized
+        rgb_frame = self._cv2.cvtColor(bgr_frame, self._cv2.COLOR_BGR2RGB)
+        captured = CapturedFrame(
+            bgr_frame=bgr_frame,
+            rgb_frame=rgb_frame,
+            index=self._frame_index,
+        )
+        self._frame_index += 1
+        return captured
+
+
 class CaptureWorker:
     """Background capture and recognition loop."""
 
@@ -301,19 +420,11 @@ class CaptureWorker:
         serial_sender = self._sender if isinstance(self._sender, SerialCommandSender) else None
         try:
             cv2 = importlib.import_module("cv2")
-            pipeline = GestureControlPipeline(
+            pipeline = _build_pipeline(
                 config=self._config,
-                static_classifier=(
-                    SklearnStaticGestureClassifier.load_path(self._static_model)
-                    if self._static_model is not None
-                    else None
-                ),
-                dynamic_classifier=(
-                    SklearnDynamicGestureClassifier.load_path(self._dynamic_model)
-                    if self._dynamic_model is not None
-                    else None
-                ),
-                command_sender=self._sender,
+                sender=self._sender,
+                static_model=self._static_model,
+                dynamic_model=self._dynamic_model,
             )
             capture = VideoCapture(self._config.video, video_path=self._video_path, cv2_module=cv2)
             self._state.set_state("opening")
@@ -379,18 +490,29 @@ class GestureDashboardServer(ThreadingHTTPServer):
         server_address: tuple[str, int],
         state: DashboardState,
         stop_event: threading.Event,
+        frame_processor: BrowserFrameProcessor | None = None,
+        cors_origin: str | None = None,
     ) -> None:
         """Initialize the local dashboard server."""
 
         super().__init__(server_address, GestureDashboardHandler)
         self.state = state
         self.stop_event = stop_event
+        self.frame_processor = frame_processor
+        self.cors_origin = cors_origin
 
 
 class GestureDashboardHandler(BaseHTTPRequestHandler):
     """Serve dashboard HTML, JSON status, and MJPEG frames."""
 
     server_version = "GestureDashboard/1.0"
+
+    def do_OPTIONS(self) -> None:
+        """Handle CORS preflight requests."""
+
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self._send_common_headers()
+        self.end_headers()
 
     def do_GET(self) -> None:
         """Handle dashboard GET routes."""
@@ -411,6 +533,32 @@ class GestureDashboardHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
+    def do_POST(self) -> None:
+        """Handle dashboard POST routes."""
+
+        path = urlparse(self.path).path
+        if path != "/api/frame":
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+
+        processor = self._dashboard_server().frame_processor
+        if processor is None:
+            self._send_json(
+                {"error": "Browser camera processing is disabled on this server."},
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        try:
+            payload = self._read_json_body(max_bytes=3_000_000)
+            response = processor.process_payload(payload)
+        except Exception as exc:
+            LOGGER.exception("Browser frame processing failed")
+            self._dashboard_server().state.set_state("error", str(exc))
+            self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(response)
+
     def log_message(self, format_value: str, *args: object) -> None:
         """Route HTTP logs through the project logger."""
 
@@ -422,24 +570,23 @@ class GestureDashboardHandler(BaseHTTPRequestHandler):
     def _send_text(self, body: str, content_type: str) -> None:
         payload = body.encode("utf-8")
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(payload)))
+        self._send_common_headers(content_type=content_type, content_length=len(payload))
         self.end_headers()
         self.wfile.write(payload)
 
-    def _send_json(self, payload: object) -> None:
+    def _send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_response(status)
+        self._send_common_headers(
+            content_type="application/json; charset=utf-8",
+            content_length=len(body),
+        )
         self.end_headers()
         self.wfile.write(body)
 
     def _send_stream(self) -> None:
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-        self.send_header("Cache-Control", "no-store")
+        self._send_common_headers(content_type="multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
 
         server = self._dashboard_server()
@@ -458,6 +605,34 @@ class GestureDashboardHandler(BaseHTTPRequestHandler):
                 break
             time.sleep(1 / 15)
 
+    def _send_common_headers(
+        self,
+        content_type: str | None = None,
+        content_length: int | None = None,
+    ) -> None:
+        if content_type is not None:
+            self.send_header("Content-Type", content_type)
+        if content_length is not None:
+            self.send_header("Content-Length", str(content_length))
+        self.send_header("Cache-Control", "no-store")
+        cors_origin = self._dashboard_server().cors_origin
+        if cors_origin:
+            self.send_header("Access-Control-Allow-Origin", cors_origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _read_json_body(self, max_bytes: int) -> dict[str, object]:
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            raise ValueError("Missing Content-Length header.")
+        length = int(raw_length)
+        if length > max_bytes:
+            raise ValueError("Request body is too large.")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON body must be an object.")
+        return payload
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser."""
@@ -465,6 +640,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the local gesture control web UI.")
     parser.add_argument("--host", default="127.0.0.1", help="Dashboard host.")
     parser.add_argument("--port", type=int, default=8000, help="Dashboard port.")
+    parser.add_argument(
+        "--input-mode",
+        choices=("server-camera", "browser-camera"),
+        default="server-camera",
+        help="Use a server-side camera/video source or frames uploaded from the browser.",
+    )
     parser.add_argument("--camera", type=int, default=0, help="Camera index for live capture.")
     parser.add_argument("--video", type=str, default=None, help="Path to a video file.")
     parser.add_argument("--frame-width", type=int, default=640, help="Capture frame width.")
@@ -492,6 +673,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Command transport backend.",
     )
     parser.add_argument("--open-browser", action="store_true", help="Open the dashboard URL.")
+    parser.add_argument(
+        "--cors-origin",
+        default=None,
+        help="Optional CORS origin for static frontend deployments, for example '*'.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     return parser
 
@@ -516,23 +702,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     config = AppConfig(video=video_config)
     sender = _build_sender(args.sender, config)
-    source = args.video if args.video is not None else f"camera:{args.camera}"
+    source = (
+        "browser-camera"
+        if args.input_mode == "browser-camera"
+        else args.video if args.video is not None else f"camera:{args.camera}"
+    )
     state = DashboardState(source=source, transport=args.sender)
     stop_event = threading.Event()
-    worker = CaptureWorker(
-        state=state,
-        config=config,
-        video_path=args.video,
-        sender=sender,
-        stop_event=stop_event,
-        loop_video=args.loop_video,
-        jpeg_quality=args.jpeg_quality,
-        static_model=args.static_model,
-        dynamic_model=args.dynamic_model,
+    worker: CaptureWorker | None = None
+    frame_processor: BrowserFrameProcessor | None = None
+    if args.input_mode == "browser-camera":
+        state.set_state("waiting")
+        frame_processor = BrowserFrameProcessor(
+            state=state,
+            config=config,
+            sender=sender,
+            jpeg_quality=args.jpeg_quality,
+            static_model=args.static_model,
+            dynamic_model=args.dynamic_model,
+        )
+    else:
+        worker = CaptureWorker(
+            state=state,
+            config=config,
+            video_path=args.video,
+            sender=sender,
+            stop_event=stop_event,
+            loop_video=args.loop_video,
+            jpeg_quality=args.jpeg_quality,
+            static_model=args.static_model,
+            dynamic_model=args.dynamic_model,
+        )
+    server = GestureDashboardServer(
+        (args.host, args.port),
+        state,
+        stop_event,
+        frame_processor=frame_processor,
+        cors_origin=args.cors_origin,
     )
-    server = GestureDashboardServer((args.host, args.port), state, stop_event)
     url = f"http://{args.host}:{server.server_port}"
-    worker.start()
+    if worker is not None:
+        worker.start()
 
     if args.open_browser:
         webbrowser.open(url)
@@ -545,7 +755,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     finally:
         stop_event.set()
         server.server_close()
-        worker.join(timeout=3.0)
+        if worker is not None:
+            worker.join(timeout=3.0)
+        if frame_processor is not None:
+            frame_processor.close()
     return 0
 
 
@@ -555,6 +768,28 @@ def _build_sender(sender_name: str, config: AppConfig) -> CommandSender:
         sender.open()
         return sender
     return MockCommandSender()
+
+
+def _build_pipeline(
+    config: AppConfig,
+    sender: CommandSender,
+    static_model: str | None,
+    dynamic_model: str | None,
+) -> GestureControlPipeline:
+    return GestureControlPipeline(
+        config=config,
+        static_classifier=(
+            SklearnStaticGestureClassifier.load_path(static_model)
+            if static_model is not None
+            else None
+        ),
+        dynamic_classifier=(
+            SklearnDynamicGestureClassifier.load_path(dynamic_model)
+            if dynamic_model is not None
+            else None
+        ),
+        command_sender=sender,
+    )
 
 
 def _annotate_frame(
@@ -657,11 +892,27 @@ INDEX_HTML = """<!doctype html>
         <p id="sourceLine">camera:0</p>
       </div>
       <div class="topbar-actions">
+        <input
+          id="apiBaseInput"
+          class="api-input"
+          type="url"
+          inputmode="url"
+          placeholder="Backend URL"
+          aria-label="Backend URL"
+        >
         <div class="state-strip">
           <span id="stateBadge" class="badge badge-muted">starting</span>
           <span id="transportBadge" class="badge">mock</span>
         </div>
         <div class="button-row">
+          <button
+            id="browserCameraToggle"
+            class="icon-button"
+            type="button"
+            title="Use this browser camera"
+          >
+            Camera
+          </button>
           <button id="demoToggle" class="icon-button" type="button" title="Toggle demo data">
             Demo
           </button>
@@ -676,6 +927,8 @@ INDEX_HTML = """<!doctype html>
       <section class="video-panel" aria-label="Recognition stream">
         <div class="video-stage">
           <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
+          <video id="browserVideo" class="browser-video" autoplay playsinline muted hidden></video>
+          <canvas id="captureCanvas" hidden></canvas>
           <div id="demoFrame" class="demo-frame" hidden>
             <div class="demo-hand" aria-hidden="true">
               <span class="finger finger-thumb"></span>
@@ -779,6 +1032,10 @@ STYLES_CSS = """
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -836,6 +1093,23 @@ h1 {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.api-input {
+  width: min(260px, 100%);
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.api-input:focus {
+  border-color: rgba(30, 110, 168, 0.55);
+  outline: 2px solid rgba(30, 110, 168, 0.12);
 }
 
 .icon-button {
@@ -930,6 +1204,20 @@ h1 {
 
 .video-stage.demo-active img {
   display: none;
+}
+
+.video-stage.browser-active img,
+.video-stage.browser-active .demo-frame {
+  display: none;
+}
+
+.browser-video {
+  width: 100%;
+  height: 100%;
+  min-height: 430px;
+  object-fit: contain;
+  background: #11161b;
+  transform: scaleX(-1);
 }
 
 .demo-frame {
@@ -1260,6 +1548,11 @@ th {
 
   .topbar-actions {
     justify-content: flex-start;
+    width: 100%;
+  }
+
+  .api-input {
+    width: 100%;
   }
 
   h1 {
@@ -1272,6 +1565,7 @@ th {
 
   .video-stage,
   .video-stage img,
+  .browser-video,
   .demo-frame {
     min-height: 260px;
   }
@@ -1295,7 +1589,8 @@ th {
 APP_JS = """
 const $ = (id) => document.getElementById(id);
 
-const API_BASE = window.GESTURE_API_BASE || "";
+const queryParams = new URLSearchParams(window.location.search);
+let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
 const DEMO_SEQUENCE = [
   ["OPEN_PALM", "STOP", 0.96, "OPEN_PALM", "UNKNOWN"],
   ["FIST", "FORWARD", 0.91, "FIST", "UNKNOWN"],
@@ -1323,9 +1618,13 @@ const GESTURE_COMMANDS = [
 ];
 
 let demoMode = false;
+let browserCameraMode = false;
 let demoIndex = 0;
 let commandCache = [];
 let lastBackendOk = true;
+let browserStream = null;
+let frameTimer = null;
+let frameInFlight = false;
 
 function text(id, value) {
   const node = $(id);
@@ -1349,25 +1648,17 @@ function setStateBadge(state) {
   else badge.classList.add("badge-muted");
 }
 
-function setDemoMode(enabled) {
-  demoMode = enabled;
-  const button = $("demoToggle");
-  if (button) button.classList.toggle("active", demoMode);
-  const stage = document.querySelector(".video-stage");
-  if (stage) stage.classList.toggle("demo-active", demoMode);
-  const demoFrame = $("demoFrame");
-  if (demoFrame) demoFrame.hidden = !demoMode;
-  if (demoMode) {
-    applyDemoStatus();
-    renderCommands(commandCache);
-  } else {
-    reloadStream();
-  }
+function buildUrl(path) {
+  const prefix = apiBase.replace(/\\/$/, "");
+  return `${prefix}/${path.replace(/^\\//, "")}`;
 }
 
-function buildUrl(path) {
-  const prefix = API_BASE.replace(/\\/$/, "");
-  return `${prefix}/${path.replace(/^\\//, "")}`;
+function syncApiBaseFromInput() {
+  const input = $("apiBaseInput");
+  if (!input) return;
+  apiBase = input.value.trim();
+  if (apiBase) window.localStorage.setItem("gestureApiBase", apiBase);
+  else window.localStorage.removeItem("gestureApiBase");
 }
 
 function escapeHtml(value) {
@@ -1444,6 +1735,23 @@ function demoStatus() {
   };
 }
 
+function setDemoMode(enabled) {
+  if (enabled && browserCameraMode) stopBrowserCamera();
+  demoMode = enabled;
+  const button = $("demoToggle");
+  if (button) button.classList.toggle("active", demoMode);
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.toggle("demo-active", demoMode);
+  const demoFrame = $("demoFrame");
+  if (demoFrame) demoFrame.hidden = !demoMode;
+  if (demoMode) {
+    applyDemoStatus();
+    renderCommands(commandCache);
+  } else {
+    reloadStream();
+  }
+}
+
 function applyDemoStatus() {
   const status = demoStatus();
   applyStatus(status);
@@ -1467,7 +1775,7 @@ function reloadStream() {
 }
 
 async function refreshStatus() {
-  if (demoMode) return;
+  if (demoMode || browserCameraMode) return;
   try {
     const response = await fetch(buildUrl("api/status"), { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1492,6 +1800,99 @@ async function refreshCommands() {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   commandCache = await response.json();
   renderCommands(commandCache);
+}
+
+async function startBrowserCamera() {
+  setDemoMode(false);
+  syncApiBaseFromInput();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showRuntimeError("Browser camera API is unavailable on this page.");
+    return;
+  }
+  try {
+    browserStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: "user",
+      },
+      audio: false,
+    });
+    const video = $("browserVideo");
+    if (!video) return;
+    video.srcObject = browserStream;
+    await video.play();
+    browserCameraMode = true;
+    const button = $("browserCameraToggle");
+    if (button) button.classList.add("active");
+    const stage = document.querySelector(".video-stage");
+    if (stage) stage.classList.add("browser-active");
+    video.hidden = false;
+    const demoFrame = $("demoFrame");
+    if (demoFrame) demoFrame.hidden = true;
+    setStateBadge("camera");
+    text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
+    frameTimer = window.setInterval(captureAndSendFrame, 220);
+  } catch (error) {
+    showRuntimeError(error.message);
+  }
+}
+
+function stopBrowserCamera() {
+  browserCameraMode = false;
+  if (frameTimer !== null) {
+    window.clearInterval(frameTimer);
+    frameTimer = null;
+  }
+  if (browserStream) {
+    for (const track of browserStream.getTracks()) track.stop();
+    browserStream = null;
+  }
+  const video = $("browserVideo");
+  if (video) {
+    video.pause();
+    video.srcObject = null;
+    video.hidden = true;
+  }
+  const button = $("browserCameraToggle");
+  if (button) button.classList.remove("active");
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.remove("browser-active");
+  reloadStream();
+}
+
+async function captureAndSendFrame() {
+  if (!browserCameraMode || frameInFlight) return;
+  const video = $("browserVideo");
+  const canvas = $("captureCanvas");
+  if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
+  frameInFlight = true;
+  try {
+    const width = 480;
+    const height = Math.max(1, Math.round(width * (video.videoHeight / video.videoWidth)));
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas capture context is unavailable.");
+    context.drawImage(video, 0, 0, width, height);
+    const image = canvas.toDataURL("image/jpeg", 0.72);
+    const response = await fetch(buildUrl("api/frame"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image }),
+    });
+    if (!response.ok) throw new Error(`Frame API HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload.status) applyStatus(payload.status);
+    if (payload.commands) {
+      commandCache = payload.commands;
+      renderCommands(commandCache);
+    }
+  } catch (error) {
+    showRuntimeError(error.message);
+  } finally {
+    frameInFlight = false;
+  }
 }
 
 function renderCommands(commands) {
@@ -1523,7 +1924,27 @@ function renderGestureMap(activeGesture = "UNKNOWN") {
   `).join("");
 }
 
+function showRuntimeError(message) {
+  setStateBadge(browserCameraMode ? "camera" : "error");
+  const errorPanel = $("errorPanel");
+  if (errorPanel) errorPanel.hidden = false;
+  text("errorText", message);
+}
+
 function bindControls() {
+  const apiInput = $("apiBaseInput");
+  if (apiInput) {
+    apiInput.value = apiBase || window.localStorage.getItem("gestureApiBase") || "";
+    apiBase = apiInput.value.trim();
+    apiInput.addEventListener("change", syncApiBaseFromInput);
+  }
+  const cameraButton = $("browserCameraToggle");
+  if (cameraButton) {
+    cameraButton.addEventListener("click", () => {
+      if (browserCameraMode) stopBrowserCamera();
+      else startBrowserCamera();
+    });
+  }
   const demoButton = $("demoToggle");
   if (demoButton) demoButton.addEventListener("click", () => setDemoMode(!demoMode));
   const reloadButton = $("reloadButton");
@@ -1533,13 +1954,13 @@ function bindControls() {
 bindControls();
 renderGestureMap();
 refreshStatus();
-refreshCommands();
+refreshCommands().catch(() => undefined);
 setInterval(refreshStatus, 500);
 setInterval(() => {
   if (demoMode) applyDemoStatus();
 }, 1300);
 setInterval(() => {
-  if (!demoMode) refreshCommands().catch(() => undefined);
+  if (!demoMode && !browserCameraMode) refreshCommands().catch(() => undefined);
 }, 1000);
 """
 
