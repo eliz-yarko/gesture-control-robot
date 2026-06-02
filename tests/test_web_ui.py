@@ -5,7 +5,7 @@ from src.interpretation.command_mapper import CommandConfirmationState
 from src.pipeline import PipelineResult
 from src.recognition.gesture_pose import analyze_static_pose
 from src.recognition.hand_detector import HandDetection
-from src.web_ui import APP_JS, INDEX_HTML, STYLES_CSS, DashboardState
+from src.web_ui import APP_JS, INDEX_HTML, STYLES_CSS, DashboardState, build_parser
 
 
 def test_dashboard_state_reports_runtime_error() -> None:
@@ -100,6 +100,19 @@ def test_dashboard_frontend_contains_browser_camera_assets() -> None:
     assert "api-input" in STYLES_CSS
     assert "browser-active" in STYLES_CSS
     assert "browser-video" in STYLES_CSS
+
+
+def test_dashboard_frontend_uses_dynamic_gesture_friendly_camera_cadence() -> None:
+    assert "const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;" in APP_JS
+    assert "setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS)" in APP_JS
+    assert 'dynamicGesture === "UNKNOWN" ? 5 : 1' in APP_JS
+
+
+def test_dashboard_parser_defaults_to_low_latency_camera_resolution() -> None:
+    args = build_parser().parse_args([])
+
+    assert args.frame_width == 480
+    assert args.frame_height == 360
 
 
 def _open_palm_landmarks() -> list[tuple[float, float, float]]:

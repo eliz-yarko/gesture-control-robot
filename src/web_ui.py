@@ -687,8 +687,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--camera", type=int, default=0, help="Camera index for live capture.")
     parser.add_argument("--video", type=str, default=None, help="Path to a video file.")
-    parser.add_argument("--frame-width", type=int, default=640, help="Capture frame width.")
-    parser.add_argument("--frame-height", type=int, default=480, help="Capture frame height.")
+    parser.add_argument("--frame-width", type=int, default=480, help="Capture frame width.")
+    parser.add_argument("--frame-height", type=int, default=360, help="Capture frame height.")
     parser.add_argument("--target-fps", type=int, default=30, help="Requested camera FPS.")
     parser.add_argument("--no-mirror", action="store_true", help="Disable mirrored preview.")
     parser.add_argument("--loop-video", action="store_true", help="Loop video files.")
@@ -1866,6 +1866,7 @@ const $ = (id) => document.getElementById(id);
 
 const queryParams = new URLSearchParams(window.location.search);
 let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
+const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;
 const DEMO_SEQUENCE = [
   ["OPEN_PALM", "STOP", 0.96, "OPEN_PALM", "UNKNOWN"],
   ["FIST", "FORWARD", 0.91, "FIST", "UNKNOWN"],
@@ -2093,7 +2094,7 @@ function applyStatus(status) {
 function demoStatus() {
   const [gesture, command, confidence, staticGesture, dynamicGesture] =
     DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
-  const requiredFrames = dynamicGesture === "UNKNOWN" ? 5 : 30;
+  const requiredFrames = dynamicGesture === "UNKNOWN" ? 5 : 1;
   return {
     state: "demo",
     source: "static-demo",
@@ -2227,7 +2228,7 @@ async function startBrowserCamera() {
     if (demoFrame) demoFrame.hidden = true;
     setStateBadge("camera");
     text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
-    frameTimer = window.setInterval(captureAndSendFrame, 220);
+    frameTimer = window.setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS);
   } catch (error) {
     showRuntimeError(error.message);
   }

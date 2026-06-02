@@ -18,8 +18,8 @@ htmlcov/
 .idea/
 *.swp
 
-# Local Codex context
-AGENTS.md
+# Local notes
+*.local.md
 
 # OS
 .DS_Store
@@ -38,5 +38,6 @@ models/*.pkl
 # Output
 *.log
 *.docx
+scripts/tmp_*
 docs/thesis/figures/*.png
 !docs/thesis/figures/.gitkeep

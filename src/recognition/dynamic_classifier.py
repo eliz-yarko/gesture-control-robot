@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from statistics import fmean, pstdev
 
 from src.config import DynamicClassifierConfig
@@ -26,20 +27,23 @@ class DynamicGestureClassifier:
         """Classify a dynamic gesture from the current trajectory window."""
 
         points = buffer.points()
-        if len(points) < self._config.buffer_size:
+        window_points = min(self._config.min_window_points, self._config.buffer_size)
+        if len(points) < window_points:
             return GesturePrediction.unknown("trajectory_buffer_not_ready")
 
-        pull = self._detect_pull_toward(points)
-        if pull is not None:
-            return pull
-
-        circle = self._detect_circle(points)
-        if circle is not None:
-            return circle
-
-        wave = self._detect_wave_lr(points)
-        if wave is not None:
-            return wave
+        recent_points = points[-self._config.buffer_size :]
+        for detector in (
+            self._detect_pull_toward,
+            self._detect_circle,
+            self._detect_wave_lr,
+        ):
+            prediction = _best_prediction_for_recent_windows(
+                recent_points,
+                min_window_points=window_points,
+                detector=detector,
+            )
+            if prediction is not None:
+                return prediction
 
         return GesturePrediction.unknown("dynamic_rules_no_match")
 
@@ -152,3 +156,33 @@ def _mostly_increasing(values: list[float]) -> bool:
         return False
     increases = sum(1 for first, second in zip(values, values[1:], strict=False) if second >= first)
     return increases / (len(values) - 1) >= 0.75
+
+
+def _best_prediction_for_recent_windows(
+    points: list[TrajectoryPoint],
+    min_window_points: int,
+    detector: Callable[[list[TrajectoryPoint]], GesturePrediction | None],
+) -> GesturePrediction | None:
+    best_prediction: GesturePrediction | None = None
+    for window in _recent_windows(points, min_window_points):
+        prediction = detector(window)
+        if prediction is None:
+            continue
+        prediction = GesturePrediction(
+            gesture_id=prediction.gesture_id,
+            confidence=prediction.confidence,
+            metadata={
+                **prediction.metadata,
+                "window_points": len(window),
+            },
+        )
+        if best_prediction is None or prediction.confidence > best_prediction.confidence:
+            best_prediction = prediction
+    return best_prediction
+
+
+def _recent_windows(
+    points: list[TrajectoryPoint],
+    min_window_points: int,
+) -> list[list[TrajectoryPoint]]:
+    return [points[-window_size:] for window_size in range(len(points), min_window_points - 1, -1)]

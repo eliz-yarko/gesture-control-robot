@@ -191,6 +191,3 @@ python scripts/plot_results.py `
 - `docs/diagrams/` — PlantUML-діаграми.
 - `docs/ux_research/` — UX-план, personas, протоколи інтерв'ю та usability test.
 - `docs/references.bib` — дозволена бібліографія для цитування.
-- `docs/CODEX_SETUP.md` — інструкція workflow для роботи з Codex.
-
-Повний контекст проєкту, правила кодування та словник жестів описані в `AGENTS.md`.

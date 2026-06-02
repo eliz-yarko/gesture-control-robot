@@ -89,25 +89,16 @@ class GestureControlPipeline:
         self._command_mapper = command_mapper or CommandMapper(self._config.command_mapping)
         self._command_sender = command_sender
         self._calibrator = calibrator
+        self._missing_detection_frames = 0
 
     def process(self, frame: CapturedFrame) -> PipelineResult:
         """Process one captured frame and optionally send a confirmed command."""
 
         detections = self._detector.detect(frame.rgb_frame)
         if not detections:
-            unknown = GesturePrediction.unknown("no_hand_detected")
-            command_event = self._command_mapper.update(unknown)
-            return PipelineResult(
-                frame_index=frame.index,
-                detections=[],
-                static_prediction=unknown,
-                dynamic_prediction=unknown,
-                selected_prediction=unknown,
-                command_event=command_event,
-                command_state=self._command_mapper.confirmation_state,
-                pose_analysis=None,
-            )
+            return self._process_missing_detection(frame)
 
+        self._missing_detection_frames = 0
         detection = max(detections, key=lambda item: item.score)
         pose_analysis = analyze_static_pose(detection.landmarks, self._config.static_classifier)
         static_prediction = self._static_classifier.classify(detection.landmarks)
@@ -116,7 +107,6 @@ class GestureControlPipeline:
         selected_prediction = _select_prediction(
             static_prediction,
             dynamic_prediction,
-            pose_analysis,
             dynamic_min_confidence=self._config.dynamic_classifier.selection_min_confidence,
         )
         if self._calibrator is not None:
@@ -129,6 +119,8 @@ class GestureControlPipeline:
 
         if command_event is not None and self._command_sender is not None:
             self._command_sender.send(command_event)
+        if command_event is not None and command_event.gesture_id.is_dynamic:
+            self._trajectory_buffer.clear()
 
         return PipelineResult(
             frame_index=frame.index,
@@ -141,6 +133,40 @@ class GestureControlPipeline:
             pose_analysis=pose_analysis,
         )
 
+    def _process_missing_detection(self, frame: CapturedFrame) -> PipelineResult:
+        self._missing_detection_frames += 1
+        unknown = GesturePrediction.unknown("no_hand_detected")
+        dynamic_prediction = self._dynamic_classifier.classify(self._trajectory_buffer)
+        selected_prediction = _select_prediction(
+            unknown,
+            dynamic_prediction,
+            dynamic_min_confidence=self._config.dynamic_classifier.selection_min_confidence,
+        )
+        command_event = self._command_mapper.update(selected_prediction)
+        command_state = self._command_mapper.confirmation_state
+
+        if command_event is not None and self._command_sender is not None:
+            self._command_sender.send(command_event)
+        if command_event is not None and command_event.gesture_id.is_dynamic:
+            self._trajectory_buffer.clear()
+            self._missing_detection_frames = 0
+        elif (
+            self._missing_detection_frames
+            > self._config.dynamic_classifier.missing_detection_tolerance_frames
+        ):
+            self._trajectory_buffer.clear()
+
+        return PipelineResult(
+            frame_index=frame.index,
+            detections=[],
+            static_prediction=unknown,
+            dynamic_prediction=dynamic_prediction,
+            selected_prediction=selected_prediction,
+            command_event=command_event,
+            command_state=command_state,
+            pose_analysis=None,
+        )
+
     def close(self) -> None:
         """Close resources owned by the detector."""
 
@@ -150,10 +176,9 @@ class GestureControlPipeline:
 def _select_prediction(
     static_prediction: GesturePrediction,
     dynamic_prediction: GesturePrediction,
-    pose_analysis: StaticPoseAnalysis,
     dynamic_min_confidence: float,
 ) -> GesturePrediction:
-    """Select the safest gesture candidate for command confirmation."""
+    """Select the gesture candidate for command confirmation."""
 
     if (
         dynamic_prediction.gesture_id == GestureID.UNKNOWN
@@ -161,26 +186,14 @@ def _select_prediction(
     ):
         return static_prediction
 
-    if _is_dynamic_pose_compatible(
-        dynamic_prediction.gesture_id,
-        static_prediction,
-        pose_analysis,
-    ):
-        return dynamic_prediction
+    if _is_emergency_stop_candidate(static_prediction):
+        return static_prediction
 
-    return static_prediction
+    return dynamic_prediction
 
 
-def _is_dynamic_pose_compatible(
-    gesture_id: GestureID,
-    static_prediction: GesturePrediction,
-    pose_analysis: StaticPoseAnalysis,
-) -> bool:
-    states = pose_analysis.finger_states
-    if gesture_id == GestureID.WAVE_LR:
-        return static_prediction.gesture_id == GestureID.OPEN_PALM
-    if gesture_id == GestureID.PULL_TOWARD:
-        return static_prediction.gesture_id in {GestureID.OPEN_PALM, GestureID.FIST}
-    if gesture_id == GestureID.CIRCLE:
-        return states.index and not any((states.middle, states.ring, states.pinky))
-    return False
+def _is_emergency_stop_candidate(static_prediction: GesturePrediction) -> bool:
+    return (
+        static_prediction.gesture_id == GestureID.THUMB_DOWN
+        and static_prediction.confidence >= 0.65
+    )

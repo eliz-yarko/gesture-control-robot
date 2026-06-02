@@ -28,6 +28,26 @@ def test_dynamic_classifier_detects_wave_lr() -> None:
     assert prediction.metadata["direction_changes"] >= 2
 
 
+def test_dynamic_classifier_detects_recent_wave_before_full_buffer() -> None:
+    buffer = TrajectoryBuffer(max_size=30)
+    xs = [0.3, 0.42, 0.58, 0.62, 0.48, 0.34, 0.28, 0.4, 0.55, 0.62]
+    for index, x in enumerate(xs):
+        buffer.add_point(
+            TrajectoryPoint(
+                palm_center=(x, 0.4, 0.0),
+                index_tip=(x, 0.2, 0.0),
+                hand_size=0.25,
+                timestamp=float(index),
+            )
+        )
+    classifier = DynamicGestureClassifier()
+
+    prediction = classifier.classify(buffer)
+
+    assert prediction.gesture_id == GestureID.WAVE_LR
+    assert prediction.metadata["window_points"] == len(xs)
+
+
 def test_dynamic_classifier_detects_circle() -> None:
     buffer = TrajectoryBuffer(max_size=30)
     for index in range(30):

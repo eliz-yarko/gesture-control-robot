@@ -21,8 +21,8 @@ class HandDetectionConfig:
     """MediaPipe hand detector settings."""
 
     max_num_hands: int = 1
-    min_detection_confidence: float = 0.7
-    min_tracking_confidence: float = 0.7
+    min_detection_confidence: float = 0.5
+    min_tracking_confidence: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,8 @@ class DynamicClassifierConfig:
     """Trajectory-based dynamic classifier thresholds."""
 
     buffer_size: int = 30
+    min_window_points: int = 5
+    missing_detection_tolerance_frames: int = 8
     min_horizontal_displacement: float = 0.18
     max_vertical_drift: float = 0.14
     min_wave_direction_changes: int = 2
@@ -51,7 +53,7 @@ class DynamicClassifierConfig:
     min_circle_angle_span: float = 5.0
     min_pull_scale_growth: float = 0.2
     min_confidence: float = 0.6
-    selection_min_confidence: float = 0.9
+    selection_min_confidence: float = 0.75
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,7 @@ class CommandMappingConfig:
     """Debouncing and command emission settings."""
 
     static_confirmation_frames: int = 5
-    dynamic_confirmation_frames: int = 5
+    dynamic_confirmation_frames: int = 1
     emergency_confirmation_frames: int = 3
     min_confidence: float = 0.65
     repeat_same_command: bool = False

@@ -34,6 +34,16 @@ def test_command_mapper_uses_shorter_emergency_debounce() -> None:
     assert event.command == RobotCommand.EMERGENCY_STOP
 
 
+def test_command_mapper_emits_dynamic_command_immediately_by_default() -> None:
+    mapper = CommandMapper()
+
+    event = mapper.update(GesturePrediction(GestureID.CIRCLE, 0.98))
+
+    assert event is not None
+    assert event.command == RobotCommand.ROTATE_360
+    assert event.gesture_id == GestureID.CIRCLE
+
+
 def test_command_mapper_resets_on_unknown_prediction() -> None:
     mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=2))
 
