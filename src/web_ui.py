@@ -33,6 +33,8 @@ from src.recognition import (
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
     StaticGestureClassifier,
+    StaticPoseAnalysis,
+    expected_pose_for,
 )
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
@@ -98,6 +100,7 @@ class DashboardSnapshot:
     last_command_confidence: float
     command_count: int
     command_state: CommandConfirmationState
+    pose_analysis: StaticPoseAnalysis | None
     error: str
     updated_at: str
     uptime_seconds: float
@@ -141,6 +144,7 @@ class DashboardState:
             last_command_confidence=0.0,
             command_count=0,
             command_state=CommandConfirmationState.unknown("waiting"),
+            pose_analysis=None,
             error="",
             updated_at=_timestamp(),
             uptime_seconds=0.0,
@@ -170,6 +174,7 @@ class DashboardState:
                 last_command_confidence=current.last_command_confidence,
                 command_count=current.command_count,
                 command_state=current.command_state,
+                pose_analysis=current.pose_analysis,
                 error=error,
                 updated_at=_timestamp(),
                 uptime_seconds=self._uptime_seconds(),
@@ -219,6 +224,7 @@ class DashboardState:
                 last_command_confidence=last_command_confidence,
                 command_count=len(self._commands),
                 command_state=result.command_state,
+                pose_analysis=result.pose_analysis,
                 error="",
                 updated_at=_timestamp(),
                 uptime_seconds=self._uptime_seconds(),
@@ -263,6 +269,10 @@ class DashboardState:
             "command_ready": snapshot.command_state.ready,
             "command_blocked_reason": snapshot.command_state.blocked_reason,
             "command_min_confidence": _rounded(self._command_config.min_confidence),
+            "landmarks": _landmarks_payload(snapshot.pose_analysis),
+            "finger_states": _finger_states_payload(snapshot.pose_analysis),
+            "pose_directions": _pose_directions_payload(snapshot.pose_analysis),
+            "expected_pose": _expected_pose_payload(snapshot.selected_gesture),
             "error": snapshot.error,
             "updated_at": snapshot.updated_at,
             "uptime_seconds": _rounded(uptime_seconds),
@@ -366,6 +376,7 @@ class BrowserFrameProcessor:
             return {
                 "status": self._state.status_payload(),
                 "commands": self._state.command_payload(),
+                "frame": _data_url(bytes(encoded)),
             }
 
     def close(self) -> None:
@@ -863,8 +874,18 @@ def _draw_hand_landmarks(
     for start, end in HAND_CONNECTIONS:
         if start < len(points) and end < len(points):
             cv2.line(frame, points[start], points[end], (26, 122, 86), 2, cv2.LINE_AA)
-    for point in points:
+    for index, point in enumerate(points):
         cv2.circle(frame, point, 4, (21, 130, 199), -1, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            str(index),
+            (point[0] + 5, point[1] - 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.36,
+            (245, 247, 250),
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _draw_overlay(
@@ -915,10 +936,62 @@ def _rounded(value: float | None) -> float | None:
     return round(value, 3)
 
 
+def _data_url(jpeg_bytes: bytes) -> str:
+    encoded = base64.b64encode(jpeg_bytes).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
 def _progress_ratio(state: CommandConfirmationState) -> float:
     if state.required_frames <= 0:
         return 0.0
     return min(1.0, state.stable_frames / state.required_frames)
+
+
+def _landmarks_payload(analysis: StaticPoseAnalysis | None) -> list[dict[str, object]]:
+    if analysis is None:
+        return []
+    return [
+        {
+            "id": index,
+            "x": _rounded(point[0]),
+            "y": _rounded(point[1]),
+            "z": _rounded(point[2]),
+        }
+        for index, point in enumerate(analysis.landmarks)
+    ]
+
+
+def _finger_states_payload(analysis: StaticPoseAnalysis | None) -> dict[str, bool]:
+    if analysis is None:
+        return {}
+    return analysis.finger_states.as_dict()
+
+
+def _pose_directions_payload(analysis: StaticPoseAnalysis | None) -> dict[str, object]:
+    if analysis is None:
+        return {}
+    return {
+        "thumb": analysis.thumb_direction,
+        "index": analysis.index_direction,
+        "ok_tip_distance": _rounded(analysis.ok_tip_distance_ratio),
+    }
+
+
+def _expected_pose_payload(gesture_name: str) -> dict[str, object]:
+    try:
+        gesture_id = GestureID[gesture_name]
+    except KeyError:
+        return {}
+    spec = expected_pose_for(gesture_id)
+    if spec is None:
+        return {}
+    return {
+        "gesture": spec.gesture_id.name,
+        "finger_states": spec.finger_states,
+        "thumb_direction": spec.thumb_direction,
+        "index_direction": spec.index_direction,
+        "max_ok_tip_distance": _rounded(spec.max_ok_tip_distance_ratio),
+    }
 
 
 def _timestamp() -> str:
@@ -1023,6 +1096,22 @@ INDEX_HTML = """<!doctype html>
         <section class="panel split-panel">
           <div><span>Static</span><strong id="staticGesture">UNKNOWN</strong></div>
           <div><span>Dynamic</span><strong id="dynamicGesture">UNKNOWN</strong></div>
+        </section>
+
+        <section class="panel pose-panel">
+          <div class="section-header compact-header">
+            <h2>Hand pose</h2>
+            <span id="poseDirection">--</span>
+          </div>
+          <div id="fingerStates" class="finger-states"></div>
+        </section>
+
+        <section class="panel landmarks-panel">
+          <div class="section-header compact-header">
+            <h2>Landmark points</h2>
+            <span id="landmarkCount">0 / 21</span>
+          </div>
+          <div id="landmarkList" class="landmark-list"></div>
         </section>
 
         <section class="panel error-panel" id="errorPanel" hidden>
@@ -1265,9 +1354,16 @@ h1 {
   display: none;
 }
 
-.video-stage.browser-active img,
 .video-stage.browser-active .demo-frame {
   display: none;
+}
+
+.video-stage.browser-active .browser-video {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .browser-video {
@@ -1523,6 +1619,76 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.pose-panel,
+.landmarks-panel {
+  padding: 14px;
+}
+
+.compact-header {
+  margin-bottom: 10px;
+}
+
+.compact-header h2 {
+  font-size: 15px;
+}
+
+.finger-states {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.finger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 12px;
+}
+
+.finger-row strong,
+.finger-row span {
+  overflow-wrap: anywhere;
+}
+
+.finger-row .match {
+  color: var(--teal);
+  font-weight: 800;
+}
+
+.finger-row .mismatch {
+  color: var(--red);
+  font-weight: 800;
+}
+
+.landmark-list {
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.landmark-point {
+  min-height: 42px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.landmark-point strong {
+  display: block;
+  font-size: 12px;
+}
+
 .error-panel {
   padding: 14px;
   border-color: rgba(179, 58, 58, 0.35);
@@ -1639,6 +1805,10 @@ th {
   .status-rail {
     grid-template-columns: 1fr;
   }
+
+  .landmark-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -1720,6 +1890,13 @@ const GESTURE_COMMANDS = [
   ["WAVE_LR", "MODE_TOGGLE"],
   ["CIRCLE", "ROTATE_360"],
   ["PULL_TOWARD", "APPROACH_OPERATOR"],
+];
+const FINGER_LABELS = [
+  ["thumb", "Thumb"],
+  ["index", "Index"],
+  ["middle", "Middle"],
+  ["ring", "Ring"],
+  ["pinky", "Pinky"],
 ];
 
 let demoMode = false;
@@ -1823,6 +2000,55 @@ function applyConfirmation(status) {
   }
 }
 
+function renderPoseDiagnostics(status) {
+  const states = status.finger_states || {};
+  const expected = (status.expected_pose && status.expected_pose.finger_states) || {};
+  const directions = status.pose_directions || {};
+  const node = $("fingerStates");
+  if (!node) return;
+  node.innerHTML = FINGER_LABELS.map(([key, label]) => {
+    const actual = states[key];
+    const target = expected[key];
+    const actualText = actual === true ? "open" : actual === false ? "closed" : "--";
+    const targetText = target === true ? "open" : target === false ? "closed" : "any";
+    const matched = target === null || target === undefined || actual === target;
+    return `
+      <div class="finger-row">
+        <strong>${label}</strong>
+        <span>${actualText} / ${targetText}</span>
+        <span class="${matched ? "match" : "mismatch"}">${matched ? "OK" : "NO"}</span>
+      </div>
+    `;
+  }).join("");
+
+  const parts = [];
+  if (directions.thumb) parts.push(`thumb ${directions.thumb}`);
+  if (directions.index) parts.push(`index ${directions.index}`);
+  if (directions.ok_tip_distance !== undefined) {
+    parts.push(`ok ${fmt(directions.ok_tip_distance)}`);
+  }
+  text("poseDirection", parts.length ? parts.join(" | ") : "--");
+}
+
+function renderLandmarks(landmarks) {
+  const points = Array.isArray(landmarks) ? landmarks : [];
+  text("landmarkCount", `${points.length} / 21`);
+  const node = $("landmarkList");
+  if (!node) return;
+  if (!points.length) {
+    node.innerHTML = '<div class="empty">No hand points</div>';
+    return;
+  }
+  node.innerHTML = points.map((point) => `
+    <div class="landmark-point">
+      <strong>#${escapeHtml(point.id)}</strong>
+      x ${escapeHtml(point.x)}<br>
+      y ${escapeHtml(point.y)}<br>
+      z ${escapeHtml(point.z)}
+    </div>
+  `).join("");
+}
+
 function applyStatus(status) {
   setStateBadge(status.state);
   text("transportBadge", status.transport);
@@ -1850,6 +2076,8 @@ function applyStatus(status) {
   );
   text("updatedAt", status.updated_at);
   applyConfirmation(status);
+  renderPoseDiagnostics(status);
+  renderLandmarks(status.landmarks);
   renderGestureMap(status.selected_gesture);
 
   const errorPanel = $("errorPanel");
@@ -1893,6 +2121,10 @@ function demoStatus() {
     command_ready: true,
     command_blocked_reason: "",
     command_min_confidence: 0.65,
+    landmarks: [],
+    finger_states: {},
+    pose_directions: {},
+    expected_pose: {},
     error: "",
     updated_at: nowTime(),
   };
@@ -2047,6 +2279,10 @@ async function captureAndSendFrame() {
     if (!response.ok) throw new Error(`Frame API HTTP ${response.status}`);
     const payload = await response.json();
     if (payload.status) applyStatus(payload.status);
+    if (payload.frame) {
+      const stream = $("stream");
+      if (stream) stream.src = payload.frame;
+    }
     if (payload.commands) {
       commandCache = payload.commands;
       renderCommands(commandCache);

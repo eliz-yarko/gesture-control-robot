@@ -11,6 +11,7 @@ from src.config import AppConfig
 from src.domain import CommandEvent, GestureID, GesturePrediction
 from src.interpretation.command_mapper import CommandConfirmationState, CommandMapper
 from src.recognition.dynamic_classifier import DynamicGestureClassifier
+from src.recognition.gesture_pose import StaticPoseAnalysis, analyze_static_pose
 from src.recognition.hand_detector import HandDetection, HandDetector
 from src.recognition.static_classifier import StaticGestureClassifier
 from src.recognition.trajectory_buffer import TrajectoryBuffer
@@ -55,6 +56,7 @@ class PipelineResult:
     command_state: CommandConfirmationState = field(
         default_factory=CommandConfirmationState.unknown
     )
+    pose_analysis: StaticPoseAnalysis | None = None
 
 
 class GestureControlPipeline:
@@ -103,9 +105,11 @@ class GestureControlPipeline:
                 selected_prediction=unknown,
                 command_event=command_event,
                 command_state=self._command_mapper.confirmation_state,
+                pose_analysis=None,
             )
 
         detection = max(detections, key=lambda item: item.score)
+        pose_analysis = analyze_static_pose(detection.landmarks, self._config.static_classifier)
         static_prediction = self._static_classifier.classify(detection.landmarks)
         self._trajectory_buffer.add_landmarks(detection.landmarks, timestamp=frame.timestamp)
         dynamic_prediction = self._dynamic_classifier.classify(self._trajectory_buffer)
@@ -129,6 +133,7 @@ class GestureControlPipeline:
             selected_prediction=selected_prediction,
             command_event=command_event,
             command_state=command_state,
+            pose_analysis=pose_analysis,
         )
 
     def close(self) -> None:

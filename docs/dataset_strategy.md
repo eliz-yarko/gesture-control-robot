@@ -101,6 +101,20 @@ python scripts/evaluate_manifest.py `
 Результат `predictions.csv` передається у `scripts/benchmark.py`, а згенеровані CSV-файли -
 у `scripts/plot_results.py`.
 
+Для навчання моделей на об'єднаному наборі використовується `scripts/retrain_open_data.py`.
+Він збирає локальні subset-и відкритих датасетів в один manifest і передає його в
+`scripts/train_gesture_models.py`:
+
+```powershell
+python scripts/retrain_open_data.py `
+  --hagrid-dir data/external/hagrid_v2 `
+  --ipn-root data/external/ipn_hand `
+  --own-dir data/external/own_control `
+  --output-manifest data/processed/training/open_data_manifest.csv `
+  --limit-per-class 250 `
+  --include-unknown
+```
+
 ## Обмеження
 
 Відкриті датасети мають інший домен, ніж камера мобільного робота: фон, відстань, роздільна

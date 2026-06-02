@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Sequence
@@ -28,6 +29,7 @@ from src.recognition.landmark_features import (  # noqa: E402
     extract_trajectory_features,
 )
 from src.recognition.trajectory_buffer import TrajectoryBuffer  # noqa: E402
+from src.utils.geometry import Landmark  # noqa: E402
 from src.utils.metrics import normalize_label  # noqa: E402
 
 
@@ -107,6 +109,8 @@ class GestureModelTrainer:
             return self._extract_landmarks_from_video(sample)
         if sample.media_type == "image":
             return self._extract_landmarks_from_image(sample)
+        if sample.media_type == "landmarks":
+            return _extract_landmark_frames(json.loads(sample.path.read_text(encoding="utf-8")))
         return []
 
     def _extract_landmarks_from_image(
@@ -382,6 +386,49 @@ def _is_dynamic_label(label: str) -> bool:
         return GestureID[label].is_dynamic
     except KeyError:
         return False
+
+
+def _extract_landmark_frames(payload: Any) -> list[list[Landmark]]:
+    if isinstance(payload, dict):
+        if "frames" in payload:
+            return _extract_landmark_frames(payload["frames"])
+        if "landmarks_sequence" in payload:
+            return _extract_landmark_frames(payload["landmarks_sequence"])
+        if "landmarks" in payload:
+            return _extract_landmark_frames(payload["landmarks"])
+
+    if _is_landmark_frame(payload):
+        return [_to_landmark_frame(payload)]
+
+    if isinstance(payload, list):
+        frames: list[list[Landmark]] = []
+        for item in payload:
+            if isinstance(item, dict) and "landmarks" in item:
+                frames.append(_to_landmark_frame(item["landmarks"]))
+            elif _is_landmark_frame(item):
+                frames.append(_to_landmark_frame(item))
+        return frames
+
+    raise ValueError("Unsupported landmarks JSON format")
+
+
+def _is_landmark_frame(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 21
+        and all(isinstance(point, list | tuple) and len(point) >= 2 for point in value)
+    )
+
+
+def _to_landmark_frame(value: Any) -> list[Landmark]:
+    return [
+        (
+            float(point[0]),
+            float(point[1]),
+            float(point[2]) if len(point) > 2 else 0.0,
+        )
+        for point in value
+    ]
 
 
 if __name__ == "__main__":

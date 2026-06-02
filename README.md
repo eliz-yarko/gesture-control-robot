@@ -86,6 +86,20 @@ python scripts/train_gesture_models.py `
   --frame-height 640
 ```
 
+Довчання на локальних subset-ах відкритих датасетів:
+
+```powershell
+python scripts/retrain_open_data.py `
+  --hagrid-dir data/external/hagrid_v2 `
+  --ipn-root data/external/ipn_hand `
+  --own-dir data/external/own_control `
+  --output-manifest data/processed/training/open_data_manifest.csv `
+  --limit-per-class 250 `
+  --include-unknown `
+  --static-output models/static_gesture_classifier.joblib `
+  --dynamic-output models/dynamic_gesture_classifier.joblib
+```
+
 Запуск прототипу або web UI з навченими моделями:
 
 ```powershell
