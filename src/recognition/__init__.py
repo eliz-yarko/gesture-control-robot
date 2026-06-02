@@ -3,6 +3,8 @@
 from src.recognition.dynamic_classifier import DynamicGestureClassifier
 from src.recognition.hand_detector import HandDetection, HandDetector
 from src.recognition.model_classifier import (
+    FallbackDynamicGestureClassifier,
+    FallbackStaticGestureClassifier,
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
 )
@@ -11,6 +13,8 @@ from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
 
 __all__ = [
     "DynamicGestureClassifier",
+    "FallbackDynamicGestureClassifier",
+    "FallbackStaticGestureClassifier",
     "FingerStates",
     "HandDetection",
     "HandDetector",

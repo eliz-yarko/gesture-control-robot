@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from src.domain import GestureID, GesturePrediction
 from src.recognition.landmark_features import (
@@ -41,10 +41,20 @@ class SklearnStaticGestureClassifier:
         self._bundle = bundle
 
     @classmethod
-    def load_path(cls, path: str | Path) -> SklearnStaticGestureClassifier:
+    def load_path(
+        cls,
+        path: str | Path,
+        min_confidence: float | None = None,
+    ) -> SklearnStaticGestureClassifier:
         """Load a static gesture classifier from a joblib file."""
 
-        return cls(_load_bundle(Path(path), expected_feature_version=STATIC_FEATURE_VERSION))
+        return cls(
+            _load_bundle(
+                Path(path),
+                expected_feature_version=STATIC_FEATURE_VERSION,
+                min_confidence=min_confidence,
+            )
+        )
 
     def classify(self, raw_landmarks: LandmarkSequence) -> GesturePrediction:
         """Classify a static gesture from MediaPipe hand landmarks."""
@@ -56,7 +66,7 @@ class SklearnStaticGestureClassifier:
 class SklearnDynamicGestureClassifier:
     """Classify dynamic gestures with a trained sklearn trajectory model."""
 
-    def __init__(self, bundle: ModelBundle, min_points: int = 8) -> None:
+    def __init__(self, bundle: ModelBundle, min_points: int = 30) -> None:
         """Initialize the classifier from a loaded model bundle."""
 
         if bundle.feature_version != DYNAMIC_FEATURE_VERSION:
@@ -65,10 +75,22 @@ class SklearnDynamicGestureClassifier:
         self._min_points = min_points
 
     @classmethod
-    def load_path(cls, path: str | Path) -> SklearnDynamicGestureClassifier:
+    def load_path(
+        cls,
+        path: str | Path,
+        min_confidence: float | None = None,
+        min_points: int = 30,
+    ) -> SklearnDynamicGestureClassifier:
         """Load a dynamic gesture classifier from a joblib file."""
 
-        return cls(_load_bundle(Path(path), expected_feature_version=DYNAMIC_FEATURE_VERSION))
+        return cls(
+            _load_bundle(
+                Path(path),
+                expected_feature_version=DYNAMIC_FEATURE_VERSION,
+                min_confidence=min_confidence,
+            ),
+            min_points=min_points,
+        )
 
     def classify(self, buffer: TrajectoryBuffer) -> GesturePrediction:
         """Classify a dynamic gesture from the current trajectory buffer."""
@@ -80,7 +102,63 @@ class SklearnDynamicGestureClassifier:
         return _predict_from_features(self._bundle, features)
 
 
-def _load_bundle(path: Path, expected_feature_version: str) -> ModelBundle:
+class FallbackStaticGestureClassifier:
+    """Use a rule-based classifier when the model does not produce a gesture."""
+
+    def __init__(self, primary: Any, fallback: Any) -> None:
+        """Initialize the primary model classifier and fallback classifier."""
+
+        self._primary = primary
+        self._fallback = fallback
+
+    def classify(self, raw_landmarks: LandmarkSequence) -> GesturePrediction:
+        """Classify landmarks, falling back when the model returns UNKNOWN."""
+
+        prediction = cast(GesturePrediction, self._primary.classify(raw_landmarks))
+        if prediction.gesture_id != GestureID.UNKNOWN:
+            return prediction
+        fallback_prediction = cast(GesturePrediction, self._fallback.classify(raw_landmarks))
+        return GesturePrediction(
+            gesture_id=fallback_prediction.gesture_id,
+            confidence=fallback_prediction.confidence,
+            metadata={
+                **fallback_prediction.metadata,
+                "fallback_after": prediction.metadata.get("reason", "model_unknown"),
+            },
+        )
+
+
+class FallbackDynamicGestureClassifier:
+    """Use trajectory heuristics when the model does not produce a dynamic gesture."""
+
+    def __init__(self, primary: Any, fallback: Any) -> None:
+        """Initialize the primary model classifier and fallback classifier."""
+
+        self._primary = primary
+        self._fallback = fallback
+
+    def classify(self, buffer: TrajectoryBuffer) -> GesturePrediction:
+        """Classify a trajectory, falling back when the model returns UNKNOWN."""
+
+        prediction = cast(GesturePrediction, self._primary.classify(buffer))
+        if prediction.gesture_id != GestureID.UNKNOWN:
+            return prediction
+        fallback_prediction = cast(GesturePrediction, self._fallback.classify(buffer))
+        return GesturePrediction(
+            gesture_id=fallback_prediction.gesture_id,
+            confidence=fallback_prediction.confidence,
+            metadata={
+                **fallback_prediction.metadata,
+                "fallback_after": prediction.metadata.get("reason", "model_unknown"),
+            },
+        )
+
+
+def _load_bundle(
+    path: Path,
+    expected_feature_version: str,
+    min_confidence: float | None = None,
+) -> ModelBundle:
     if not path.exists():
         raise FileNotFoundError(f"Model file does not exist: {path}")
 
@@ -106,11 +184,18 @@ def _load_bundle(path: Path, expected_feature_version: str) -> ModelBundle:
     if not label_names:
         raise ValueError(f"Model bundle does not contain label names: {path}")
 
+    bundle_min_confidence = float(payload.get("min_confidence", 0.45))
+    effective_min_confidence = (
+        bundle_min_confidence
+        if min_confidence is None
+        else max(bundle_min_confidence, min_confidence)
+    )
+
     return ModelBundle(
         model=model,
         label_names=label_names,
         feature_version=feature_version,
-        min_confidence=float(payload.get("min_confidence", 0.45)),
+        min_confidence=effective_min_confidence,
         model_type=str(payload.get("model_type", "sklearn")),
     )
 

@@ -39,6 +39,17 @@ def test_static_classifier_rejects_invalid_landmark_shape() -> None:
         classifier.classify([[0.0, 0.0, 0.0]])
 
 
+def test_static_classifier_accepts_open_palm_with_relaxed_thumb() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.OPEN_PALM)
+    _set_thumb(landmarks, extended=False, direction="right")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.OPEN_PALM
+    assert prediction.confidence >= 0.85
+
+
 def _landmarks_for(gesture_id: GestureID) -> list[list[float]]:
     states = {
         "thumb": False,

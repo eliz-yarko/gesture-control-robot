@@ -66,9 +66,9 @@ class CommandMappingConfig:
     """Debouncing and command emission settings."""
 
     static_confirmation_frames: int = 5
-    dynamic_confirmation_frames: int = 1
+    dynamic_confirmation_frames: int = 30
     emergency_confirmation_frames: int = 3
-    min_confidence: float = 0.6
+    min_confidence: float = 0.65
     repeat_same_command: bool = False
 
 

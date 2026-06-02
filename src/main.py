@@ -11,7 +11,14 @@ from src.calibration import AdaptiveCalibrator, CalibrationProfileStore
 from src.capture.video_capture import VideoCapture
 from src.config import AppConfig, VideoConfig
 from src.pipeline import GestureControlPipeline, PipelineResult
-from src.recognition import SklearnDynamicGestureClassifier, SklearnStaticGestureClassifier
+from src.recognition import (
+    DynamicGestureClassifier,
+    FallbackDynamicGestureClassifier,
+    FallbackStaticGestureClassifier,
+    SklearnDynamicGestureClassifier,
+    SklearnStaticGestureClassifier,
+    StaticGestureClassifier,
+)
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
 from src.transmission.serial_sender import SerialCommandSender
@@ -80,18 +87,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.calibration_profile is not None:
         profile = CalibrationProfileStore(config.calibration).load_path(args.calibration_profile)
         calibrator = AdaptiveCalibrator(profile, config.calibration)
+    static_classifier = None
+    dynamic_classifier = None
+    if args.static_model is not None:
+        static_classifier = FallbackStaticGestureClassifier(
+            primary=SklearnStaticGestureClassifier.load_path(
+                args.static_model,
+                min_confidence=config.command_mapping.min_confidence,
+            ),
+            fallback=StaticGestureClassifier(config.static_classifier),
+        )
+    if args.dynamic_model is not None:
+        dynamic_classifier = FallbackDynamicGestureClassifier(
+            primary=SklearnDynamicGestureClassifier.load_path(
+                args.dynamic_model,
+                min_confidence=config.command_mapping.min_confidence,
+                min_points=config.dynamic_classifier.buffer_size,
+            ),
+            fallback=DynamicGestureClassifier(config.dynamic_classifier),
+        )
     pipeline = GestureControlPipeline(
         config=config,
-        static_classifier=(
-            SklearnStaticGestureClassifier.load_path(args.static_model)
-            if args.static_model is not None
-            else None
-        ),
-        dynamic_classifier=(
-            SklearnDynamicGestureClassifier.load_path(args.dynamic_model)
-            if args.dynamic_model is not None
-            else None
-        ),
+        static_classifier=static_classifier,
+        dynamic_classifier=dynamic_classifier,
         command_sender=sender,
         calibrator=calibrator,
     )

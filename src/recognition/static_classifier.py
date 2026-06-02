@@ -71,8 +71,9 @@ class StaticGestureClassifier:
             if states.middle or states.ring or states.pinky:
                 return GesturePrediction(GestureID.OK_SIGN, 0.95, metadata)
 
-        if states.as_tuple() == (True, True, True, True, True):
-            return GesturePrediction(GestureID.OPEN_PALM, 0.95, metadata)
+        if states.index and states.middle and states.ring and states.pinky:
+            confidence = 0.95 if states.thumb else 0.86
+            return GesturePrediction(GestureID.OPEN_PALM, confidence, metadata)
 
         if states.as_tuple() == (False, False, False, False, False):
             return GesturePrediction(GestureID.FIST, 0.92, metadata)

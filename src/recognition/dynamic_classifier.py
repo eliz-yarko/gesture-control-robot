@@ -26,8 +26,8 @@ class DynamicGestureClassifier:
         """Classify a dynamic gesture from the current trajectory window."""
 
         points = buffer.points()
-        if len(points) < max(6, self._config.buffer_size // 2):
-            return GesturePrediction.unknown("trajectory_too_short")
+        if len(points) < self._config.buffer_size:
+            return GesturePrediction.unknown("trajectory_buffer_not_ready")
 
         pull = self._detect_pull_toward(points)
         if pull is not None:

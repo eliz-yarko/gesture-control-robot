@@ -8,10 +8,12 @@ from src.recognition.landmark_features import (
     extract_trajectory_features,
 )
 from src.recognition.model_classifier import (
+    FallbackStaticGestureClassifier,
     ModelBundle,
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
 )
+from src.recognition.static_classifier import StaticGestureClassifier
 from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
 
 
@@ -48,6 +50,24 @@ def test_static_model_classifier_rejects_low_confidence_prediction() -> None:
     assert prediction.gesture_id == GestureID.UNKNOWN
 
 
+def test_fallback_static_classifier_uses_rules_after_low_confidence_model() -> None:
+    primary = SklearnStaticGestureClassifier(
+        ModelBundle(
+            model=_FakeModel(("THUMB_DOWN", "OPEN_PALM"), (0.31, 0.29)),
+            label_names=("THUMB_DOWN", "OPEN_PALM"),
+            feature_version=STATIC_FEATURE_VERSION,
+            min_confidence=0.65,
+            model_type="fake",
+        )
+    )
+    classifier = FallbackStaticGestureClassifier(primary, StaticGestureClassifier())
+
+    prediction = classifier.classify(_open_palm_landmarks())
+
+    assert prediction.gesture_id == GestureID.OPEN_PALM
+    assert prediction.metadata["fallback_after"] == "model_confidence_below_threshold"
+
+
 def test_dynamic_model_classifier_uses_trajectory_features() -> None:
     classifier = SklearnDynamicGestureClassifier(
         ModelBundle(
@@ -73,6 +93,32 @@ def test_dynamic_model_classifier_uses_trajectory_features() -> None:
     prediction = classifier.classify(buffer)
 
     assert prediction.gesture_id == GestureID.WAVE_LR
+
+
+def test_dynamic_model_classifier_waits_for_full_window_by_default() -> None:
+    classifier = SklearnDynamicGestureClassifier(
+        ModelBundle(
+            model=_FakeModel(("CIRCLE", "WAVE_LR"), (0.25, 0.75)),
+            label_names=("CIRCLE", "WAVE_LR"),
+            feature_version=DYNAMIC_FEATURE_VERSION,
+            min_confidence=0.3,
+            model_type="fake",
+        )
+    )
+    buffer = TrajectoryBuffer(max_size=30)
+    for index, x in enumerate((0.2, 0.6, 0.3)):
+        buffer.add_point(
+            TrajectoryPoint(
+                palm_center=(x, 0.4, 0.0),
+                index_tip=(x, 0.2, 0.0),
+                hand_size=0.2,
+                timestamp=float(index),
+            )
+        )
+
+    prediction = classifier.classify(buffer)
+
+    assert prediction.gesture_id == GestureID.UNKNOWN
 
 
 def test_feature_extractors_return_stable_lengths() -> None:

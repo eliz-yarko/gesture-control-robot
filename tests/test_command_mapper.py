@@ -55,3 +55,30 @@ def test_command_mapper_does_not_repeat_same_command_by_default() -> None:
 
     assert first_event is not None
     assert second_event is None
+
+
+def test_command_mapper_reports_confirmation_progress() -> None:
+    mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=3))
+    prediction = GesturePrediction(GestureID.OPEN_PALM, 0.9)
+
+    assert mapper.update(prediction) is None
+
+    state = mapper.confirmation_state
+    assert state.gesture_id == GestureID.OPEN_PALM
+    assert state.command == RobotCommand.STOP
+    assert state.stable_frames == 1
+    assert state.required_frames == 3
+    assert state.ready is False
+    assert state.blocked_reason == "debouncing"
+
+
+def test_command_mapper_reports_low_confidence_block() -> None:
+    mapper = CommandMapper(CommandMappingConfig(min_confidence=0.65))
+
+    assert mapper.update(GesturePrediction(GestureID.THUMB_DOWN, 0.31)) is None
+
+    state = mapper.confirmation_state
+    assert state.gesture_id == GestureID.THUMB_DOWN
+    assert state.command == RobotCommand.EMERGENCY_STOP
+    assert state.stable_frames == 0
+    assert state.blocked_reason == "confidence_below_threshold"

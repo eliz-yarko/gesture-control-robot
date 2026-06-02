@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from src.calibration.adaptive_calibrator import AdaptiveCalibrator
 from src.capture.video_capture import CapturedFrame
 from src.config import AppConfig
 from src.domain import CommandEvent, GestureID, GesturePrediction
-from src.interpretation.command_mapper import CommandMapper
+from src.interpretation.command_mapper import CommandConfirmationState, CommandMapper
 from src.recognition.dynamic_classifier import DynamicGestureClassifier
 from src.recognition.hand_detector import HandDetection, HandDetector
 from src.recognition.static_classifier import StaticGestureClassifier
@@ -52,6 +52,9 @@ class PipelineResult:
     dynamic_prediction: GesturePrediction
     selected_prediction: GesturePrediction
     command_event: CommandEvent | None
+    command_state: CommandConfirmationState = field(
+        default_factory=CommandConfirmationState.unknown
+    )
 
 
 class GestureControlPipeline:
@@ -99,6 +102,7 @@ class GestureControlPipeline:
                 dynamic_prediction=unknown,
                 selected_prediction=unknown,
                 command_event=command_event,
+                command_state=self._command_mapper.confirmation_state,
             )
 
         detection = max(detections, key=lambda item: item.score)
@@ -112,6 +116,7 @@ class GestureControlPipeline:
                 detection.landmarks,
             )
         command_event = self._command_mapper.update(selected_prediction)
+        command_state = self._command_mapper.confirmation_state
 
         if command_event is not None and self._command_sender is not None:
             self._command_sender.send(command_event)
@@ -123,6 +128,7 @@ class GestureControlPipeline:
             dynamic_prediction=dynamic_prediction,
             selected_prediction=selected_prediction,
             command_event=command_event,
+            command_state=command_state,
         )
 
     def close(self) -> None:

@@ -22,10 +22,18 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from src.capture.video_capture import CapturedFrame, VideoCapture
-from src.config import AppConfig, VideoConfig
+from src.config import AppConfig, CommandMappingConfig, VideoConfig
 from src.domain import CommandEvent, GestureID, RobotCommand
+from src.interpretation.command_mapper import CommandConfirmationState
 from src.pipeline import GestureControlPipeline, PipelineResult
-from src.recognition import SklearnDynamicGestureClassifier, SklearnStaticGestureClassifier
+from src.recognition import (
+    DynamicGestureClassifier,
+    FallbackDynamicGestureClassifier,
+    FallbackStaticGestureClassifier,
+    SklearnDynamicGestureClassifier,
+    SklearnStaticGestureClassifier,
+    StaticGestureClassifier,
+)
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
 from src.transmission.serial_sender import SerialCommandSender
@@ -89,6 +97,7 @@ class DashboardSnapshot:
     last_command_gesture: str
     last_command_confidence: float
     command_count: int
+    command_state: CommandConfirmationState
     error: str
     updated_at: str
     uptime_seconds: float
@@ -97,11 +106,18 @@ class DashboardSnapshot:
 class DashboardState:
     """Shared state between the capture worker and HTTP handlers."""
 
-    def __init__(self, source: str, transport: str, command_limit: int = 40) -> None:
+    def __init__(
+        self,
+        source: str,
+        transport: str,
+        command_limit: int = 40,
+        command_config: CommandMappingConfig | None = None,
+    ) -> None:
         """Initialize empty dashboard state."""
 
         self._source = source
         self._transport = transport
+        self._command_config = command_config or CommandMappingConfig()
         self._started_at = perf_counter()
         self._lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
@@ -124,6 +140,7 @@ class DashboardState:
             last_command_gesture=GestureID.UNKNOWN.name,
             last_command_confidence=0.0,
             command_count=0,
+            command_state=CommandConfirmationState.unknown("waiting"),
             error="",
             updated_at=_timestamp(),
             uptime_seconds=0.0,
@@ -152,6 +169,7 @@ class DashboardState:
                 last_command_gesture=current.last_command_gesture,
                 last_command_confidence=current.last_command_confidence,
                 command_count=current.command_count,
+                command_state=current.command_state,
                 error=error,
                 updated_at=_timestamp(),
                 uptime_seconds=self._uptime_seconds(),
@@ -200,6 +218,7 @@ class DashboardState:
                 last_command_gesture=last_command_gesture,
                 last_command_confidence=last_command_confidence,
                 command_count=len(self._commands),
+                command_state=result.command_state,
                 error="",
                 updated_at=_timestamp(),
                 uptime_seconds=self._uptime_seconds(),
@@ -235,6 +254,15 @@ class DashboardState:
             "last_command_gesture": snapshot.last_command_gesture,
             "last_command_confidence": _rounded(snapshot.last_command_confidence),
             "command_count": snapshot.command_count,
+            "command_candidate_gesture": snapshot.command_state.gesture_id.name,
+            "command_candidate_command": snapshot.command_state.command.value,
+            "command_candidate_confidence": _rounded(snapshot.command_state.confidence),
+            "command_stable_frames": snapshot.command_state.stable_frames,
+            "command_required_frames": snapshot.command_state.required_frames,
+            "command_progress": _rounded(_progress_ratio(snapshot.command_state)),
+            "command_ready": snapshot.command_state.ready,
+            "command_blocked_reason": snapshot.command_state.blocked_reason,
+            "command_min_confidence": _rounded(self._command_config.min_confidence),
             "error": snapshot.error,
             "updated_at": snapshot.updated_at,
             "uptime_seconds": _rounded(uptime_seconds),
@@ -707,7 +735,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.input_mode == "browser-camera"
         else args.video if args.video is not None else f"camera:{args.camera}"
     )
-    state = DashboardState(source=source, transport=args.sender)
+    state = DashboardState(
+        source=source,
+        transport=args.sender,
+        command_config=config.command_mapping,
+    )
     stop_event = threading.Event()
     worker: CaptureWorker | None = None
     frame_processor: BrowserFrameProcessor | None = None
@@ -776,18 +808,29 @@ def _build_pipeline(
     static_model: str | None,
     dynamic_model: str | None,
 ) -> GestureControlPipeline:
+    static_classifier = None
+    dynamic_classifier = None
+    if static_model is not None:
+        static_classifier = FallbackStaticGestureClassifier(
+            primary=SklearnStaticGestureClassifier.load_path(
+                static_model,
+                min_confidence=config.command_mapping.min_confidence,
+            ),
+            fallback=StaticGestureClassifier(config.static_classifier),
+        )
+    if dynamic_model is not None:
+        dynamic_classifier = FallbackDynamicGestureClassifier(
+            primary=SklearnDynamicGestureClassifier.load_path(
+                dynamic_model,
+                min_confidence=config.command_mapping.min_confidence,
+                min_points=config.dynamic_classifier.buffer_size,
+            ),
+            fallback=DynamicGestureClassifier(config.dynamic_classifier),
+        )
     return GestureControlPipeline(
         config=config,
-        static_classifier=(
-            SklearnStaticGestureClassifier.load_path(static_model)
-            if static_model is not None
-            else None
-        ),
-        dynamic_classifier=(
-            SklearnDynamicGestureClassifier.load_path(dynamic_model)
-            if dynamic_model is not None
-            else None
-        ),
+        static_classifier=static_classifier,
+        dynamic_classifier=dynamic_classifier,
         command_sender=sender,
     )
 
@@ -872,6 +915,12 @@ def _rounded(value: float | None) -> float | None:
     return round(value, 3)
 
 
+def _progress_ratio(state: CommandConfirmationState) -> float:
+    if state.required_frames <= 0:
+        return 0.0
+    return min(1.0, state.stable_frames / state.required_frames)
+
+
 def _timestamp() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
@@ -942,16 +991,26 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div class="frame-strip">
           <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
-          <div><span>Command</span><strong id="lastCommand">UNKNOWN</strong></div>
+          <div><span>Last command</span><strong id="lastCommand">UNKNOWN</strong></div>
           <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
         </div>
       </section>
 
       <aside class="status-rail">
         <section class="panel command-panel">
-          <span class="eyebrow">confirmed command</span>
+          <span class="eyebrow">last confirmed command</span>
           <strong id="commandDisplay">UNKNOWN</strong>
           <span id="lastCommandMeta">UNKNOWN / 0.00</span>
+        </section>
+
+        <section class="panel confirmation-panel">
+          <span class="eyebrow">confirmation</span>
+          <strong id="candidateCommand">UNKNOWN</strong>
+          <span id="candidateGesture">UNKNOWN / 0.00</span>
+          <div class="progress-track" aria-hidden="true">
+            <span id="confirmationProgressBar"></span>
+          </div>
+          <span id="confirmationProgressText">0 / 0 frames</span>
         </section>
 
         <section class="metrics-grid">
@@ -1364,6 +1423,52 @@ h1 {
   font-size: 13px;
 }
 
+.confirmation-panel {
+  padding: 16px;
+}
+
+.confirmation-panel strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 23px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.confirmation-panel > span:not(.eyebrow) {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe7ee;
+}
+
+.progress-track span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+  transition: width 160ms ease;
+}
+
+.confirmation-panel.ready .progress-track span {
+  background: var(--teal);
+}
+
+.confirmation-panel.blocked .progress-track span {
+  background: var(--amber);
+}
+
 .eyebrow {
   color: var(--muted);
   font-size: 12px;
@@ -1678,6 +1783,46 @@ function nowTime() {
   });
 }
 
+function recognitionLabel(gesture, confidence, minConfidence) {
+  const value = `${gesture} / ${fmt(confidence)}`;
+  if (gesture !== "UNKNOWN" && confidence < minConfidence) return `${value} low`;
+  return value;
+}
+
+function reasonLabel(reason) {
+  if (!reason) return "";
+  return String(reason).replaceAll("_", " ");
+}
+
+function applyConfirmation(status) {
+  const minConfidence = status.command_min_confidence ?? 0.65;
+  const gesture = status.command_candidate_gesture || "UNKNOWN";
+  const command = status.command_candidate_command || "UNKNOWN";
+  const confidence = status.command_candidate_confidence ?? 0;
+  const stableFrames = status.command_stable_frames || 0;
+  const requiredFrames = status.command_required_frames || 0;
+  const progress = Math.max(0, Math.min(1, status.command_progress || 0));
+  const reason = status.command_blocked_reason || "";
+  const panel = document.querySelector(".confirmation-panel");
+  if (panel) {
+    panel.classList.toggle("ready", Boolean(status.command_ready));
+    panel.classList.toggle("blocked", reason === "confidence_below_threshold");
+  }
+  text("candidateCommand", command);
+  text("candidateGesture", `${gesture} / ${fmt(confidence)}`);
+  const bar = $("confirmationProgressBar");
+  if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
+  if (reason === "confidence_below_threshold") {
+    text("confirmationProgressText", `${fmt(confidence)} < ${fmt(minConfidence)} threshold`);
+  } else if (reason === "repeat_suppressed") {
+    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames, already sent`);
+  } else if (requiredFrames > 0) {
+    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames`);
+  } else {
+    text("confirmationProgressText", reasonLabel(reason) || "0 / 0 frames");
+  }
+}
+
 function applyStatus(status) {
   setStateBadge(status.state);
   text("transportBadge", status.transport);
@@ -1694,9 +1839,17 @@ function applyStatus(status) {
   text("latency", fmt(status.latency_ms, " ms", 1));
   text("handCount", status.hand_count);
   text("frameIndex", status.frame_index);
-  text("staticGesture", `${status.static_gesture} / ${fmt(status.static_confidence)}`);
-  text("dynamicGesture", `${status.dynamic_gesture} / ${fmt(status.dynamic_confidence)}`);
+  const minConfidence = status.command_min_confidence ?? 0.65;
+  text(
+    "staticGesture",
+    recognitionLabel(status.static_gesture, status.static_confidence, minConfidence)
+  );
+  text(
+    "dynamicGesture",
+    recognitionLabel(status.dynamic_gesture, status.dynamic_confidence, minConfidence)
+  );
   text("updatedAt", status.updated_at);
+  applyConfirmation(status);
   renderGestureMap(status.selected_gesture);
 
   const errorPanel = $("errorPanel");
@@ -1712,6 +1865,7 @@ function applyStatus(status) {
 function demoStatus() {
   const [gesture, command, confidence, staticGesture, dynamicGesture] =
     DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
+  const requiredFrames = dynamicGesture === "UNKNOWN" ? 5 : 30;
   return {
     state: "demo",
     source: "static-demo",
@@ -1730,6 +1884,15 @@ function demoStatus() {
     last_command_gesture: gesture,
     last_command_confidence: confidence,
     command_count: commandCache.length,
+    command_candidate_gesture: gesture,
+    command_candidate_command: command,
+    command_candidate_confidence: confidence,
+    command_stable_frames: requiredFrames,
+    command_required_frames: requiredFrames,
+    command_progress: 1,
+    command_ready: true,
+    command_blocked_reason: "",
+    command_min_confidence: 0.65,
     error: "",
     updated_at: nowTime(),
   };
