@@ -31,8 +31,10 @@ class StaticClassifierConfig:
 
     extended_finger_ratio: float = 1.12
     thumb_extended_ratio: float = 1.05
+    thumb_tip_extension_ratio: float = 0.55
+    thumb_vertical_clearance_ratio: float = 0.45
     direction_margin: float = 0.05
-    ok_tip_distance_ratio: float = 0.16
+    ok_tip_distance_ratio: float = 0.28
     min_confidence: float = 0.6
 
 
@@ -49,6 +51,7 @@ class DynamicClassifierConfig:
     min_circle_angle_span: float = 5.0
     min_pull_scale_growth: float = 0.2
     min_confidence: float = 0.6
+    selection_min_confidence: float = 0.9
 
 
 @dataclass(frozen=True)
@@ -66,7 +69,7 @@ class CommandMappingConfig:
     """Debouncing and command emission settings."""
 
     static_confirmation_frames: int = 5
-    dynamic_confirmation_frames: int = 30
+    dynamic_confirmation_frames: int = 5
     emergency_confirmation_frames: int = 3
     min_confidence: float = 0.65
     repeat_same_command: bool = False

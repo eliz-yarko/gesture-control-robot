@@ -113,7 +113,12 @@ class GestureControlPipeline:
         static_prediction = self._static_classifier.classify(detection.landmarks)
         self._trajectory_buffer.add_landmarks(detection.landmarks, timestamp=frame.timestamp)
         dynamic_prediction = self._dynamic_classifier.classify(self._trajectory_buffer)
-        selected_prediction = _select_prediction(static_prediction, dynamic_prediction)
+        selected_prediction = _select_prediction(
+            static_prediction,
+            dynamic_prediction,
+            pose_analysis,
+            dynamic_min_confidence=self._config.dynamic_classifier.selection_min_confidence,
+        )
         if self._calibrator is not None:
             selected_prediction = self._calibrator.adjust_prediction(
                 selected_prediction,
@@ -145,17 +150,37 @@ class GestureControlPipeline:
 def _select_prediction(
     static_prediction: GesturePrediction,
     dynamic_prediction: GesturePrediction,
+    pose_analysis: StaticPoseAnalysis,
+    dynamic_min_confidence: float,
 ) -> GesturePrediction:
-    """Prefer confirmed dynamic gestures over per-frame static gestures."""
+    """Select the safest gesture candidate for command confirmation."""
 
     if (
-        dynamic_prediction.gesture_id != GestureID.UNKNOWN
-        and dynamic_prediction.confidence >= static_prediction.confidence
+        dynamic_prediction.gesture_id == GestureID.UNKNOWN
+        or dynamic_prediction.confidence < dynamic_min_confidence
+    ):
+        return static_prediction
+
+    if _is_dynamic_pose_compatible(
+        dynamic_prediction.gesture_id,
+        static_prediction,
+        pose_analysis,
     ):
         return dynamic_prediction
-    if (
-        dynamic_prediction.gesture_id != GestureID.UNKNOWN
-        and static_prediction.gesture_id == GestureID.UNKNOWN
-    ):
-        return dynamic_prediction
+
     return static_prediction
+
+
+def _is_dynamic_pose_compatible(
+    gesture_id: GestureID,
+    static_prediction: GesturePrediction,
+    pose_analysis: StaticPoseAnalysis,
+) -> bool:
+    states = pose_analysis.finger_states
+    if gesture_id == GestureID.WAVE_LR:
+        return static_prediction.gesture_id == GestureID.OPEN_PALM
+    if gesture_id == GestureID.PULL_TOWARD:
+        return static_prediction.gesture_id in {GestureID.OPEN_PALM, GestureID.FIST}
+    if gesture_id == GestureID.CIRCLE:
+        return states.index and not any((states.middle, states.ring, states.pinky))
+    return False

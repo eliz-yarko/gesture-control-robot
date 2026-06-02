@@ -50,6 +50,87 @@ def test_static_classifier_accepts_open_palm_with_relaxed_thumb() -> None:
     assert prediction.confidence >= 0.85
 
 
+def test_static_classifier_accepts_peace_with_open_thumb() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.PEACE)
+    _set_thumb(landmarks, extended=True, direction="right")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.PEACE
+    assert prediction.confidence >= 0.85
+
+
+def test_static_classifier_accepts_three_fingers_with_open_thumb() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.THREE_FINGERS)
+    _set_thumb(landmarks, extended=True, direction="right")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.THREE_FINGERS
+    assert prediction.confidence >= 0.85
+
+
+def test_static_classifier_accepts_pointing_with_open_thumb() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.INDEX_RIGHT)
+    _set_thumb(landmarks, extended=True, direction="right")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.INDEX_RIGHT
+    assert prediction.confidence >= 0.85
+
+
+def test_static_classifier_treats_closed_fingers_with_side_thumb_as_fist() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.FIST)
+    _set_thumb(landmarks, extended=True, direction="right")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.FIST
+    assert prediction.confidence >= 0.85
+
+
+def test_static_classifier_treats_short_vertical_thumb_as_fist() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.FIST)
+    _set_short_vertical_thumb(landmarks, direction="up")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.FIST
+    assert prediction.confidence >= 0.85
+
+
+def test_static_classifier_accepts_relaxed_ok_ring() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.OK_SIGN)
+    landmarks[4] = [0.02, -0.43, 0.0]
+    landmarks[8] = [0.06, -0.43, 0.0]
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.OK_SIGN
+    assert prediction.confidence >= 0.9
+
+
+def test_static_classifier_accepts_three_detected_as_middle_ring_pinky() -> None:
+    classifier = StaticGestureClassifier()
+    landmarks = _landmarks_for(GestureID.FIST)
+    _set_thumb(landmarks, extended=True, direction="right")
+    _set_finger(landmarks, 9, 10, 11, 12, 0.0, True, "up")
+    _set_finger(landmarks, 13, 14, 15, 16, 0.12, True, "up")
+    _set_finger(landmarks, 17, 18, 19, 20, 0.22, True, "up")
+
+    prediction = classifier.classify(landmarks)
+
+    assert prediction.gesture_id == GestureID.THREE_FINGERS
+    assert prediction.confidence >= 0.85
+
+
 def _landmarks_for(gesture_id: GestureID) -> list[list[float]]:
     states = {
         "thumb": False,
@@ -123,6 +204,17 @@ def _set_thumb(landmarks: list[list[float]], extended: bool, direction: str) -> 
     else:
         landmarks[3] = [0.32, -0.10, 0.0]
         landmarks[4] = [0.50, -0.10, 0.0]
+
+
+def _set_short_vertical_thumb(landmarks: list[list[float]], direction: str) -> None:
+    landmarks[1] = [0.14, -0.08, 0.0]
+    landmarks[2] = [0.18, -0.10, 0.0]
+    if direction == "down":
+        landmarks[3] = [0.18, 0.00, 0.0]
+        landmarks[4] = [0.18, 0.08, 0.0]
+    else:
+        landmarks[3] = [0.18, -0.18, 0.0]
+        landmarks[4] = [0.18, -0.26, 0.0]
 
 
 def _set_finger(

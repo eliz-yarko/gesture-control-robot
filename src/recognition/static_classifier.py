@@ -15,6 +15,8 @@ from src.recognition.gesture_pose import (
 )
 from src.utils.geometry import (
     LandmarkSequence,
+    distance,
+    hand_scale,
     to_landmarks,
 )
 
@@ -48,45 +50,83 @@ class StaticGestureClassifier:
         pose = analyze_static_pose(landmarks, self._config)
         states = pose.finger_states
         ok_tip_distance = pose.ok_tip_distance_ratio
+        thumb_tip_extension = _thumb_tip_extension_ratio(landmarks)
+        thumb_vertical_clearance = _thumb_vertical_clearance_ratio(landmarks, pose.thumb_direction)
+        open_non_thumb_count = sum((states.index, states.middle, states.ring, states.pinky))
         metadata = {
             "finger_states": states.as_dict(),
             "ok_tip_distance": ok_tip_distance,
+            "thumb_tip_extension": thumb_tip_extension,
+            "thumb_vertical_clearance": thumb_vertical_clearance,
         }
 
         if ok_tip_distance <= self._config.ok_tip_distance_ratio:
-            if states.middle or states.ring or states.pinky:
+            if sum((states.middle, states.ring, states.pinky)) >= 2:
                 return GesturePrediction(GestureID.OK_SIGN, 0.95, metadata)
 
         if states.index and states.middle and states.ring and states.pinky:
             confidence = 0.95 if states.thumb else 0.86
             return GesturePrediction(GestureID.OPEN_PALM, confidence, metadata)
 
-        if states.as_tuple() == (False, False, False, False, False):
-            return GesturePrediction(GestureID.FIST, 0.92, metadata)
-
-        if states.thumb and not any((states.index, states.middle, states.ring, states.pinky)):
+        non_thumb_closed = not any((states.index, states.middle, states.ring, states.pinky))
+        if non_thumb_closed:
             thumb_direction = pose.thumb_direction
             metadata["thumb_direction"] = thumb_direction
-            if thumb_direction == "up":
-                return GesturePrediction(GestureID.THUMB_UP, 0.9, metadata)
-            if thumb_direction == "down":
-                return GesturePrediction(GestureID.THUMB_DOWN, 0.9, metadata)
+            thumb_is_isolated = (
+                states.thumb
+                and thumb_tip_extension >= self._config.thumb_tip_extension_ratio
+                and thumb_vertical_clearance >= self._config.thumb_vertical_clearance_ratio
+            )
+            if thumb_is_isolated:
+                if thumb_direction == "up":
+                    return GesturePrediction(GestureID.THUMB_UP, 0.9, metadata)
+                if thumb_direction == "down":
+                    return GesturePrediction(GestureID.THUMB_DOWN, 0.9, metadata)
+            confidence = 0.92 if not states.thumb else 0.86
+            return GesturePrediction(GestureID.FIST, confidence, metadata)
 
-        if states.index and not any((states.thumb, states.middle, states.ring, states.pinky)):
+        if states.index and not any((states.middle, states.ring, states.pinky)):
             index_direction = pose.index_direction
             metadata["index_direction"] = index_direction
             if index_direction == "left":
-                return GesturePrediction(GestureID.INDEX_LEFT, 0.9, metadata)
+                confidence = 0.9 if not states.thumb else 0.86
+                return GesturePrediction(GestureID.INDEX_LEFT, confidence, metadata)
             if index_direction == "right":
-                return GesturePrediction(GestureID.INDEX_RIGHT, 0.9, metadata)
+                confidence = 0.9 if not states.thumb else 0.86
+                return GesturePrediction(GestureID.INDEX_RIGHT, confidence, metadata)
 
-        if states.as_tuple() == (False, True, True, False, False):
-            return GesturePrediction(GestureID.PEACE, 0.92, metadata)
+        if states.index and states.middle and not any((states.ring, states.pinky)):
+            confidence = 0.92 if not states.thumb else 0.88
+            return GesturePrediction(GestureID.PEACE, confidence, metadata)
 
-        if states.as_tuple() == (False, True, True, True, False):
-            return GesturePrediction(GestureID.THREE_FINGERS, 0.92, metadata)
+        if open_non_thumb_count == 3:
+            confidence = 0.92 if not states.thumb else 0.88
+            return GesturePrediction(GestureID.THREE_FINGERS, confidence, metadata)
 
-        if states.as_tuple() == (False, False, False, False, True):
-            return GesturePrediction(GestureID.PINKY, 0.9, metadata)
+        if states.pinky and not any((states.index, states.middle, states.ring)):
+            confidence = 0.9 if not states.thumb else 0.84
+            return GesturePrediction(GestureID.PINKY, confidence, metadata)
 
         return GesturePrediction.unknown("static_rules_no_match")
+
+
+def _thumb_tip_extension_ratio(landmarks: LandmarkSequence) -> float:
+    normalized_landmarks = to_landmarks(landmarks)
+    return distance(normalized_landmarks[2], normalized_landmarks[4]) / hand_scale(
+        normalized_landmarks
+    )
+
+
+def _thumb_vertical_clearance_ratio(landmarks: LandmarkSequence, direction: str) -> float:
+    normalized_landmarks = to_landmarks(landmarks)
+    if direction not in {"up", "down"}:
+        return 0.0
+
+    scale = hand_scale(normalized_landmarks)
+    thumb_tip_y = normalized_landmarks[4][1]
+    folded_finger_y_values = [normalized_landmarks[index][1] for index in (6, 10, 14, 18)]
+    if direction == "up":
+        clearance = min(folded_finger_y_values) - thumb_tip_y
+    else:
+        clearance = thumb_tip_y - max(folded_finger_y_values)
+    return clearance / scale

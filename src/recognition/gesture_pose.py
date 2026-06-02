@@ -66,7 +66,7 @@ EXPECTED_STATIC_POSES: dict[GestureID, GesturePoseSpec] = {
     GestureID.OPEN_PALM: GesturePoseSpec(
         gesture_id=GestureID.OPEN_PALM,
         finger_states={
-            "thumb": True,
+            "thumb": None,
             "index": True,
             "middle": True,
             "ring": True,
@@ -108,7 +108,7 @@ EXPECTED_STATIC_POSES: dict[GestureID, GesturePoseSpec] = {
     GestureID.INDEX_LEFT: GesturePoseSpec(
         gesture_id=GestureID.INDEX_LEFT,
         finger_states={
-            "thumb": False,
+            "thumb": None,
             "index": True,
             "middle": False,
             "ring": False,
@@ -119,7 +119,7 @@ EXPECTED_STATIC_POSES: dict[GestureID, GesturePoseSpec] = {
     GestureID.INDEX_RIGHT: GesturePoseSpec(
         gesture_id=GestureID.INDEX_RIGHT,
         finger_states={
-            "thumb": False,
+            "thumb": None,
             "index": True,
             "middle": False,
             "ring": False,
@@ -130,7 +130,7 @@ EXPECTED_STATIC_POSES: dict[GestureID, GesturePoseSpec] = {
     GestureID.PEACE: GesturePoseSpec(
         gesture_id=GestureID.PEACE,
         finger_states={
-            "thumb": False,
+            "thumb": None,
             "index": True,
             "middle": True,
             "ring": False,
@@ -140,7 +140,7 @@ EXPECTED_STATIC_POSES: dict[GestureID, GesturePoseSpec] = {
     GestureID.THREE_FINGERS: GesturePoseSpec(
         gesture_id=GestureID.THREE_FINGERS,
         finger_states={
-            "thumb": False,
+            "thumb": None,
             "index": True,
             "middle": True,
             "ring": True,
@@ -166,7 +166,7 @@ EXPECTED_STATIC_POSES: dict[GestureID, GesturePoseSpec] = {
             "ring": True,
             "pinky": True,
         },
-        max_ok_tip_distance_ratio=0.16,
+        max_ok_tip_distance_ratio=0.28,
     ),
 }
 
