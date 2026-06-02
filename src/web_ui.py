@@ -23,6 +23,7 @@ from src.capture.video_capture import VideoCapture
 from src.config import AppConfig, VideoConfig
 from src.domain import CommandEvent, GestureID, RobotCommand
 from src.pipeline import GestureControlPipeline, PipelineResult
+from src.recognition import SklearnDynamicGestureClassifier, SklearnStaticGestureClassifier
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
 from src.transmission.serial_sender import SerialCommandSender
@@ -269,6 +270,8 @@ class CaptureWorker:
         stop_event: threading.Event,
         loop_video: bool,
         jpeg_quality: int,
+        static_model: str | None = None,
+        dynamic_model: str | None = None,
     ) -> None:
         """Initialize the worker without opening hardware resources."""
 
@@ -279,6 +282,8 @@ class CaptureWorker:
         self._stop_event = stop_event
         self._loop_video = loop_video
         self._jpeg_quality = jpeg_quality
+        self._static_model = static_model
+        self._dynamic_model = dynamic_model
         self._thread = threading.Thread(target=self._run, name="gesture-ui-capture", daemon=True)
 
     def start(self) -> None:
@@ -296,7 +301,20 @@ class CaptureWorker:
         serial_sender = self._sender if isinstance(self._sender, SerialCommandSender) else None
         try:
             cv2 = importlib.import_module("cv2")
-            pipeline = GestureControlPipeline(config=self._config, command_sender=self._sender)
+            pipeline = GestureControlPipeline(
+                config=self._config,
+                static_classifier=(
+                    SklearnStaticGestureClassifier.load_path(self._static_model)
+                    if self._static_model is not None
+                    else None
+                ),
+                dynamic_classifier=(
+                    SklearnDynamicGestureClassifier.load_path(self._dynamic_model)
+                    if self._dynamic_model is not None
+                    else None
+                ),
+                command_sender=self._sender,
+            )
             capture = VideoCapture(self._config.video, video_path=self._video_path, cv2_module=cv2)
             self._state.set_state("opening")
             with capture:
@@ -456,6 +474,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loop-video", action="store_true", help="Loop video files.")
     parser.add_argument("--jpeg-quality", type=int, default=82, help="MJPEG JPEG quality.")
     parser.add_argument(
+        "--static-model",
+        type=str,
+        default=None,
+        help="Optional joblib model for static gesture classification.",
+    )
+    parser.add_argument(
+        "--dynamic-model",
+        type=str,
+        default=None,
+        help="Optional joblib model for dynamic gesture classification.",
+    )
+    parser.add_argument(
         "--sender",
         choices=("mock", "serial"),
         default="mock",
@@ -497,6 +527,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         stop_event=stop_event,
         loop_video=args.loop_video,
         jpeg_quality=args.jpeg_quality,
+        static_model=args.static_model,
+        dynamic_model=args.dynamic_model,
     )
     server = GestureDashboardServer((args.host, args.port), state, stop_event)
     url = f"http://{args.host}:{server.server_port}"

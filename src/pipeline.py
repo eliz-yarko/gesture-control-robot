@@ -15,6 +15,7 @@ from src.recognition.hand_detector import HandDetection, HandDetector
 from src.recognition.static_classifier import StaticGestureClassifier
 from src.recognition.trajectory_buffer import TrajectoryBuffer
 from src.transmission.base_sender import CommandSender
+from src.utils.geometry import LandmarkSequence
 
 
 class HandDetectorProtocol(Protocol):
@@ -25,6 +26,20 @@ class HandDetectorProtocol(Protocol):
 
     def close(self) -> None:
         """Release detector resources."""
+
+
+class StaticClassifierProtocol(Protocol):
+    """Minimal static classifier contract used by the pipeline."""
+
+    def classify(self, raw_landmarks: LandmarkSequence) -> GesturePrediction:
+        """Return a static gesture prediction for one landmark frame."""
+
+
+class DynamicClassifierProtocol(Protocol):
+    """Minimal dynamic classifier contract used by the pipeline."""
+
+    def classify(self, buffer: TrajectoryBuffer) -> GesturePrediction:
+        """Return a dynamic gesture prediction for the current trajectory."""
 
 
 @dataclass(frozen=True)
@@ -46,8 +61,8 @@ class GestureControlPipeline:
         self,
         config: AppConfig | None = None,
         detector: HandDetectorProtocol | None = None,
-        static_classifier: StaticGestureClassifier | None = None,
-        dynamic_classifier: DynamicGestureClassifier | None = None,
+        static_classifier: StaticClassifierProtocol | None = None,
+        dynamic_classifier: DynamicClassifierProtocol | None = None,
         trajectory_buffer: TrajectoryBuffer | None = None,
         command_mapper: CommandMapper | None = None,
         command_sender: CommandSender | None = None,

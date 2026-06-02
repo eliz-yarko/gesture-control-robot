@@ -11,6 +11,7 @@ from src.calibration import AdaptiveCalibrator, CalibrationProfileStore
 from src.capture.video_capture import VideoCapture
 from src.config import AppConfig, VideoConfig
 from src.pipeline import GestureControlPipeline, PipelineResult
+from src.recognition import SklearnDynamicGestureClassifier, SklearnStaticGestureClassifier
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
 from src.transmission.serial_sender import SerialCommandSender
@@ -34,6 +35,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Path to a user calibration profile JSON file.",
+    )
+    parser.add_argument(
+        "--static-model",
+        type=str,
+        default=None,
+        help="Optional joblib model for static gesture classification.",
+    )
+    parser.add_argument(
+        "--dynamic-model",
+        type=str,
+        default=None,
+        help="Optional joblib model for dynamic gesture classification.",
     )
     parser.add_argument(
         "--sender",
@@ -69,6 +82,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         calibrator = AdaptiveCalibrator(profile, config.calibration)
     pipeline = GestureControlPipeline(
         config=config,
+        static_classifier=(
+            SklearnStaticGestureClassifier.load_path(args.static_model)
+            if args.static_model is not None
+            else None
+        ),
+        dynamic_classifier=(
+            SklearnDynamicGestureClassifier.load_path(args.dynamic_model)
+            if args.dynamic_model is not None
+            else None
+        ),
         command_sender=sender,
         calibrator=calibrator,
     )

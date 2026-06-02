@@ -73,6 +73,28 @@ jester_001,../external/jester/pulling_hand_in/001.mp4,PULL_TOWARD,video,jester,n
 circle_001,../processed/landmarks/circle_001.json,CIRCLE,landmarks,own_control,normal,1m
 ```
 
+Навчання локальних landmark-моделей на власному контрольному наборі:
+
+```powershell
+python scripts/train_gesture_models.py `
+  --manifest data/processed/benchmark_inputs/own_control_manifest.csv `
+  --static-output models/static_gesture_classifier.joblib `
+  --dynamic-output models/dynamic_gesture_classifier.joblib `
+  --frame-stride 5 `
+  --max-frames 90 `
+  --frame-width 480 `
+  --frame-height 640
+```
+
+Запуск прототипу або web UI з навченими моделями:
+
+```powershell
+python -m src.web_ui `
+  --camera 0 `
+  --static-model models/static_gesture_classifier.joblib `
+  --dynamic-model models/dynamic_gesture_classifier.joblib
+```
+
 Швидкий варіант для власного контрольного набору:
 
 ```powershell

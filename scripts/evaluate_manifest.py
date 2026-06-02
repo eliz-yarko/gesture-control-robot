@@ -25,6 +25,8 @@ from src.evaluation.manifest import write_prediction_records  # noqa: E402
 from src.recognition import (
     DynamicGestureClassifier,
     HandDetector,
+    SklearnDynamicGestureClassifier,
+    SklearnStaticGestureClassifier,
     StaticGestureClassifier,
 )  # noqa: E402
 from src.recognition.trajectory_buffer import TrajectoryBuffer  # noqa: E402
@@ -42,6 +44,8 @@ class SampleEvaluator:
         frame_stride: int,
         max_frames: int | None,
         mirror_frame: bool,
+        static_model: Path | None = None,
+        dynamic_model: Path | None = None,
     ) -> None:
         """Initialize reusable detector and classifier objects."""
 
@@ -52,8 +56,16 @@ class SampleEvaluator:
         self._mirror_frame = mirror_frame
         self._cv2 = importlib.import_module("cv2")
         self._detector = HandDetector(config.hand_detection)
-        self._static_classifier = StaticGestureClassifier(config.static_classifier)
-        self._dynamic_classifier = DynamicGestureClassifier(config.dynamic_classifier)
+        self._static_classifier = (
+            SklearnStaticGestureClassifier.load_path(static_model)
+            if static_model is not None
+            else StaticGestureClassifier(config.static_classifier)
+        )
+        self._dynamic_classifier = (
+            SklearnDynamicGestureClassifier.load_path(dynamic_model)
+            if dynamic_model is not None
+            else DynamicGestureClassifier(config.dynamic_classifier)
+        )
 
     def evaluate(self, sample: EvaluationSample) -> PredictionRecord:
         """Evaluate one manifest sample."""
@@ -265,6 +277,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frame-width", type=int, default=640, help="Video resize width.")
     parser.add_argument("--frame-height", type=int, default=480, help="Video resize height.")
     parser.add_argument(
+        "--static-model",
+        type=str,
+        default=None,
+        help="Optional joblib model for static gesture classification.",
+    )
+    parser.add_argument(
+        "--dynamic-model",
+        type=str,
+        default=None,
+        help="Optional joblib model for dynamic gesture classification.",
+    )
+    parser.add_argument(
         "--mirror-frame", action="store_true", help="Mirror frames before detection."
     )
     parser.add_argument(
@@ -297,6 +321,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         frame_stride=args.frame_stride,
         max_frames=args.max_frames,
         mirror_frame=args.mirror_frame,
+        static_model=Path(args.static_model) if args.static_model is not None else None,
+        dynamic_model=Path(args.dynamic_model) if args.dynamic_model is not None else None,
     )
     records: list[PredictionRecord] = []
 
