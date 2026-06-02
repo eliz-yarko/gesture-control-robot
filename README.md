@@ -95,6 +95,14 @@ python -m src.web_ui `
   --dynamic-model models/dynamic_gesture_classifier.joblib
 ```
 
+Статичний demo-frontend для безкоштовного хостингу:
+
+```powershell
+python scripts/export_demo_frontend.py --output docs/demo
+```
+
+Варіанти деплою описані у `docs/DEPLOYMENT.md`.
+
 Швидкий варіант для власного контрольного набору:
 
 ```powershell

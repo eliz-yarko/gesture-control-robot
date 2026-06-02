@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gesture Control Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="title-block">
+        <h1>Gesture Control Console</h1>
+        <p id="sourceLine">camera:0</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="state-strip">
+          <span id="stateBadge" class="badge badge-muted">starting</span>
+          <span id="transportBadge" class="badge">mock</span>
+        </div>
+        <div class="button-row">
+          <button id="demoToggle" class="icon-button" type="button" title="Toggle demo data">
+            Demo
+          </button>
+          <button id="reloadButton" class="icon-button" type="button" title="Reload stream">
+            Reload
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <section class="video-panel" aria-label="Recognition stream">
+        <div class="video-stage">
+          <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
+          <div id="demoFrame" class="demo-frame" hidden>
+            <div class="demo-hand" aria-hidden="true">
+              <span class="finger finger-thumb"></span>
+              <span class="finger finger-index"></span>
+              <span class="finger finger-middle"></span>
+              <span class="finger finger-ring"></span>
+              <span class="finger finger-pinky"></span>
+              <span class="palm"></span>
+            </div>
+          </div>
+        </div>
+        <div class="frame-strip">
+          <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
+          <div><span>Command</span><strong id="lastCommand">UNKNOWN</strong></div>
+          <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
+        </div>
+      </section>
+
+      <aside class="status-rail">
+        <section class="panel command-panel">
+          <span class="eyebrow">confirmed command</span>
+          <strong id="commandDisplay">UNKNOWN</strong>
+          <span id="lastCommandMeta">UNKNOWN / 0.00</span>
+        </section>
+
+        <section class="metrics-grid">
+          <div class="metric"><span>FPS</span><strong id="fps">0.0</strong></div>
+          <div class="metric"><span>Latency</span><strong id="latency">0 ms</strong></div>
+          <div class="metric"><span>Hands</span><strong id="handCount">0</strong></div>
+          <div class="metric"><span>Frame</span><strong id="frameIndex">0</strong></div>
+        </section>
+
+        <section class="panel split-panel">
+          <div><span>Static</span><strong id="staticGesture">UNKNOWN</strong></div>
+          <div><span>Dynamic</span><strong id="dynamicGesture">UNKNOWN</strong></div>
+        </section>
+
+        <section class="panel error-panel" id="errorPanel" hidden>
+          <span class="eyebrow">runtime</span>
+          <strong id="errorText"></strong>
+        </section>
+      </aside>
+    </section>
+
+    <section class="lower-grid">
+      <section class="log-band">
+        <div class="section-header">
+          <h2>Command Log</h2>
+          <span id="updatedAt">--:--:--</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Command</th>
+              <th>Gesture</th>
+              <th>Confidence</th>
+              <th>Frame</th>
+            </tr>
+          </thead>
+          <tbody id="commandRows">
+            <tr><td colspan="5" class="empty">No commands emitted</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="map-band">
+        <div class="section-header">
+          <h2>Gesture Map</h2>
+          <span>13 gestures</span>
+        </div>
+        <div id="gestureMap" class="gesture-map"></div>
+      </section>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

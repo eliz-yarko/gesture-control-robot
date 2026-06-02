@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.domain import CommandEvent, GestureID, GesturePrediction, RobotCommand
 from src.pipeline import PipelineResult
 from src.recognition.hand_detector import HandDetection
-from src.web_ui import DashboardState
+from src.web_ui import APP_JS, INDEX_HTML, STYLES_CSS, DashboardState
 
 
 def test_dashboard_state_reports_runtime_error() -> None:
@@ -51,3 +51,11 @@ def test_dashboard_state_publishes_frame_and_command_log() -> None:
     assert state.latest_jpeg() == b"jpg"
     assert commands[0]["command"] == "STOP"
     assert commands[0]["gesture"] == "OPEN_PALM"
+
+
+def test_dashboard_frontend_contains_demo_mode_assets() -> None:
+    assert "demoToggle" in INDEX_HTML
+    assert "gestureMap" in INDEX_HTML
+    assert "DEMO_SEQUENCE" in APP_JS
+    assert "GESTURE_COMMANDS" in APP_JS
+    assert "demo-frame" in STYLES_CSS

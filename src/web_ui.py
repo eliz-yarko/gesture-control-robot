@@ -646,41 +646,62 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gesture Control Dashboard</title>
-  <link rel="stylesheet" href="/styles.css">
+  <title>Gesture Control Console</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <div>
-        <h1>Gesture Control</h1>
+      <div class="title-block">
+        <h1>Gesture Control Console</h1>
         <p id="sourceLine">camera:0</p>
       </div>
-      <div class="state-strip">
-        <span id="stateBadge" class="badge badge-muted">starting</span>
-        <span id="transportBadge" class="badge">mock</span>
+      <div class="topbar-actions">
+        <div class="state-strip">
+          <span id="stateBadge" class="badge badge-muted">starting</span>
+          <span id="transportBadge" class="badge">mock</span>
+        </div>
+        <div class="button-row">
+          <button id="demoToggle" class="icon-button" type="button" title="Toggle demo data">
+            Demo
+          </button>
+          <button id="reloadButton" class="icon-button" type="button" title="Reload stream">
+            Reload
+          </button>
+        </div>
       </div>
     </header>
 
     <section class="workspace">
-      <div class="video-stage">
-        <img id="stream" src="/stream.mjpg" alt="Live gesture recognition stream">
-      </div>
+      <section class="video-panel" aria-label="Recognition stream">
+        <div class="video-stage">
+          <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
+          <div id="demoFrame" class="demo-frame" hidden>
+            <div class="demo-hand" aria-hidden="true">
+              <span class="finger finger-thumb"></span>
+              <span class="finger finger-index"></span>
+              <span class="finger finger-middle"></span>
+              <span class="finger finger-ring"></span>
+              <span class="finger finger-pinky"></span>
+              <span class="palm"></span>
+            </div>
+          </div>
+        </div>
+        <div class="frame-strip">
+          <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
+          <div><span>Command</span><strong id="lastCommand">UNKNOWN</strong></div>
+          <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
+        </div>
+      </section>
 
       <aside class="status-rail">
         <section class="panel command-panel">
           <span class="eyebrow">confirmed command</span>
-          <strong id="lastCommand">UNKNOWN</strong>
+          <strong id="commandDisplay">UNKNOWN</strong>
           <span id="lastCommandMeta">UNKNOWN / 0.00</span>
         </section>
 
         <section class="metrics-grid">
-          <div class="metric">
-            <span>Gesture</span><strong id="selectedGesture">UNKNOWN</strong>
-          </div>
-          <div class="metric">
-            <span>Confidence</span><strong id="selectedConfidence">0.00</strong>
-          </div>
           <div class="metric"><span>FPS</span><strong id="fps">0.0</strong></div>
           <div class="metric"><span>Latency</span><strong id="latency">0 ms</strong></div>
           <div class="metric"><span>Hands</span><strong id="handCount">0</strong></div>
@@ -699,28 +720,38 @@ INDEX_HTML = """<!doctype html>
       </aside>
     </section>
 
-    <section class="log-band">
-      <div class="log-header">
-        <h2>Command Log</h2>
-        <span id="updatedAt">--:--:--</span>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Command</th>
-            <th>Gesture</th>
-            <th>Confidence</th>
-            <th>Frame</th>
-          </tr>
-        </thead>
-        <tbody id="commandRows">
-          <tr><td colspan="5" class="empty">No commands emitted</td></tr>
-        </tbody>
-      </table>
+    <section class="lower-grid">
+      <section class="log-band">
+        <div class="section-header">
+          <h2>Command Log</h2>
+          <span id="updatedAt">--:--:--</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Command</th>
+              <th>Gesture</th>
+              <th>Confidence</th>
+              <th>Frame</th>
+            </tr>
+          </thead>
+          <tbody id="commandRows">
+            <tr><td colspan="5" class="empty">No commands emitted</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="map-band">
+        <div class="section-header">
+          <h2>Gesture Map</h2>
+          <span>13 gestures</span>
+        </div>
+        <div id="gestureMap" class="gesture-map"></div>
+      </section>
     </section>
   </main>
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
 """
@@ -729,16 +760,19 @@ INDEX_HTML = """<!doctype html>
 STYLES_CSS = """
 :root {
   color-scheme: light;
-  --page: #f4f6f8;
-  --ink: #182026;
-  --muted: #61707d;
-  --line: #d9e0e6;
+  --page: #eef2f5;
+  --ink: #17212b;
+  --muted: #66727d;
+  --line: #d4dde5;
   --panel: #ffffff;
-  --graphite: #20262d;
-  --teal: #137a63;
-  --blue: #1f6fb2;
-  --amber: #ad6b00;
+  --panel-soft: #f8fafb;
+  --graphite: #252c33;
+  --teal: #0f7f68;
+  --blue: #1e6ea8;
+  --amber: #a96603;
   --red: #b33a3a;
+  --violet: #7352a1;
+  --shadow: 0 14px 34px rgba(31, 41, 55, 0.08);
 }
 
 * {
@@ -754,9 +788,9 @@ body {
 }
 
 .app-shell {
-  width: min(1440px, 100%);
+  width: min(1480px, 100%);
   margin: 0 auto;
-  padding: 18px;
+  padding: 18px 20px 24px;
 }
 
 .topbar {
@@ -764,7 +798,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 10px 2px 18px;
+  padding: 8px 2px 18px;
 }
 
 h1, h2, p {
@@ -772,8 +806,9 @@ h1, h2, p {
 }
 
 h1 {
-  font-size: 28px;
-  font-weight: 750;
+  font-size: 27px;
+  font-weight: 760;
+  letter-spacing: 0;
 }
 
 .topbar p {
@@ -782,11 +817,44 @@ h1 {
   font-size: 14px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .state-strip {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.icon-button {
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--graphite);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.icon-button.active {
+  border-color: rgba(30, 110, 168, 0.45);
+  color: var(--blue);
 }
 
 .badge {
@@ -815,21 +883,35 @@ h1 {
   color: var(--red);
 }
 
+.badge-demo {
+  border-color: rgba(115, 82, 161, 0.35);
+  color: var(--violet);
+}
+
 .badge-muted {
   color: var(--muted);
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: 18px;
   align-items: stretch;
 }
 
+.video-panel,
+.log-band,
+.map-band {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
 .video-stage {
-  min-height: 360px;
+  position: relative;
+  min-height: 430px;
   background: #11161b;
-  border: 1px solid #12171c;
   border-radius: 8px;
   overflow: hidden;
   display: grid;
@@ -839,11 +921,125 @@ h1 {
 .video-stage img {
   width: 100%;
   height: 100%;
-  min-height: 360px;
+  min-height: 430px;
   aspect-ratio: 4 / 3;
   object-fit: contain;
   display: block;
   background: #11161b;
+}
+
+.video-stage.demo-active img {
+  display: none;
+}
+
+.demo-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 430px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    #11161b;
+  background-size: 36px 36px;
+}
+
+.demo-hand {
+  position: relative;
+  width: 172px;
+  height: 220px;
+  transform: rotate(-8deg);
+  animation: hand-scan 2.6s ease-in-out infinite;
+}
+
+.palm {
+  position: absolute;
+  left: 46px;
+  bottom: 24px;
+  width: 86px;
+  height: 106px;
+  border-radius: 32px 32px 28px 28px;
+  background: #d9a071;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.finger {
+  position: absolute;
+  bottom: 122px;
+  width: 22px;
+  border-radius: 14px;
+  background: #d9a071;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  transform-origin: bottom center;
+}
+
+.finger-thumb {
+  left: 25px;
+  bottom: 88px;
+  height: 74px;
+  transform: rotate(-47deg);
+}
+
+.finger-index {
+  left: 54px;
+  height: 124px;
+}
+
+.finger-middle {
+  left: 82px;
+  height: 144px;
+}
+
+.finger-ring {
+  left: 110px;
+  height: 126px;
+}
+
+.finger-pinky {
+  left: 138px;
+  height: 94px;
+  transform: rotate(10deg);
+}
+
+@keyframes hand-scan {
+  0%, 100% {
+    transform: translateX(-34px) rotate(-8deg);
+  }
+  50% {
+    transform: translateX(34px) rotate(8deg);
+  }
+}
+
+.frame-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+}
+
+.frame-strip div {
+  min-height: 74px;
+  padding: 13px 14px;
+  border-right: 1px solid var(--line);
+}
+
+.frame-strip div:last-child {
+  border-right: 0;
+}
+
+.frame-strip span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.frame-strip strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+  overflow-wrap: anywhere;
 }
 
 .status-rail {
@@ -857,6 +1053,7 @@ h1 {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+  box-shadow: var(--shadow);
 }
 
 .command-panel {
@@ -893,7 +1090,7 @@ h1 {
 }
 
 .metric {
-  min-height: 78px;
+  min-height: 82px;
   padding: 12px;
 }
 
@@ -923,7 +1120,7 @@ h1 {
 .split-panel div {
   min-height: 84px;
   padding: 14px;
-  background: #fbfcfd;
+  background: var(--panel-soft);
 }
 
 .split-panel strong {
@@ -946,16 +1143,21 @@ h1 {
   line-height: 1.35;
 }
 
-.log-band {
+.lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 430px;
+  gap: 18px;
   margin-top: 18px;
+  align-items: start;
+}
+
+.log-band,
+.map-band {
   padding: 16px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
   overflow-x: auto;
 }
 
-.log-header {
+.section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -967,7 +1169,7 @@ h2 {
   font-size: 18px;
 }
 
-.log-header span {
+.section-header span {
   color: var(--muted);
   font-size: 13px;
 }
@@ -997,8 +1199,47 @@ th {
   text-align: center;
 }
 
+.gesture-map {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.gesture-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.gesture-item.active {
+  border-color: rgba(19, 122, 99, 0.4);
+  background: #eef8f5;
+}
+
+.gesture-item strong,
+.gesture-item span {
+  overflow-wrap: anywhere;
+}
+
+.gesture-item strong {
+  font-size: 13px;
+}
+
+.gesture-item span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 @media (max-width: 980px) {
-  .workspace {
+  .workspace,
+  .lower-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1017,6 +1258,10 @@ th {
     flex-direction: column;
   }
 
+  .topbar-actions {
+    justify-content: flex-start;
+  }
+
   h1 {
     font-size: 24px;
   }
@@ -1026,8 +1271,22 @@ th {
   }
 
   .video-stage,
-  .video-stage img {
+  .video-stage img,
+  .demo-frame {
     min-height: 260px;
+  }
+
+  .frame-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .frame-strip div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .frame-strip div:last-child {
+    border-bottom: 0;
   }
 }
 """
@@ -1036,13 +1295,46 @@ th {
 APP_JS = """
 const $ = (id) => document.getElementById(id);
 
+const API_BASE = window.GESTURE_API_BASE || "";
+const DEMO_SEQUENCE = [
+  ["OPEN_PALM", "STOP", 0.96, "OPEN_PALM", "UNKNOWN"],
+  ["FIST", "FORWARD", 0.91, "FIST", "UNKNOWN"],
+  ["INDEX_LEFT", "TURN_LEFT", 0.88, "INDEX_LEFT", "UNKNOWN"],
+  ["INDEX_RIGHT", "TURN_RIGHT", 0.90, "INDEX_RIGHT", "UNKNOWN"],
+  ["THUMB_UP", "START", 0.94, "THUMB_UP", "UNKNOWN"],
+  ["WAVE_LR", "MODE_TOGGLE", 0.86, "OPEN_PALM", "WAVE_LR"],
+  ["CIRCLE", "ROTATE_360", 0.84, "UNKNOWN", "CIRCLE"],
+  ["PULL_TOWARD", "APPROACH_OPERATOR", 0.82, "UNKNOWN", "PULL_TOWARD"],
+];
+const GESTURE_COMMANDS = [
+  ["OPEN_PALM", "STOP"],
+  ["FIST", "FORWARD"],
+  ["THUMB_UP", "START"],
+  ["THUMB_DOWN", "EMERGENCY_STOP"],
+  ["INDEX_LEFT", "TURN_LEFT"],
+  ["INDEX_RIGHT", "TURN_RIGHT"],
+  ["PEACE", "INCREASE_SPEED"],
+  ["THREE_FINGERS", "DECREASE_SPEED"],
+  ["PINKY", "RETURN_HOME"],
+  ["OK_SIGN", "CONFIRM_ACTION"],
+  ["WAVE_LR", "MODE_TOGGLE"],
+  ["CIRCLE", "ROTATE_360"],
+  ["PULL_TOWARD", "APPROACH_OPERATOR"],
+];
+
+let demoMode = false;
+let demoIndex = 0;
+let commandCache = [];
+let lastBackendOk = true;
+
 function text(id, value) {
   const node = $(id);
   if (node) node.textContent = value;
 }
 
-function fmt(value, suffix = "") {
+function fmt(value, suffix = "", digits = 2) {
   if (value === null || value === undefined) return "--";
+  if (typeof value === "number") return `${value.toFixed(digits)}${suffix}`;
   return `${value}${suffix}`;
 }
 
@@ -1052,51 +1344,157 @@ function setStateBadge(state) {
   badge.textContent = state;
   badge.className = "badge";
   if (state === "running") badge.classList.add("badge-running");
+  else if (state === "demo") badge.classList.add("badge-demo");
   else if (state === "error") badge.classList.add("badge-error");
   else badge.classList.add("badge-muted");
 }
 
-async function refreshStatus() {
-  try {
-    const response = await fetch("/api/status", { cache: "no-store" });
-    const status = await response.json();
-    setStateBadge(status.state);
-    text("transportBadge", status.transport);
-    text("sourceLine", status.source);
-    text("lastCommand", status.last_command);
-    text(
-      "lastCommandMeta",
-      `${status.last_command_gesture} / ${fmt(status.last_command_confidence)}`
-    );
-    text("selectedGesture", status.selected_gesture);
-    text("selectedConfidence", fmt(status.selected_confidence));
-    text("fps", fmt(status.fps));
-    text("latency", fmt(status.latency_ms, " ms"));
-    text("handCount", status.hand_count);
-    text("frameIndex", status.frame_index);
-    text("staticGesture", `${status.static_gesture} / ${fmt(status.static_confidence)}`);
-    text("dynamicGesture", `${status.dynamic_gesture} / ${fmt(status.dynamic_confidence)}`);
-    text("updatedAt", status.updated_at);
+function setDemoMode(enabled) {
+  demoMode = enabled;
+  const button = $("demoToggle");
+  if (button) button.classList.toggle("active", demoMode);
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.toggle("demo-active", demoMode);
+  const demoFrame = $("demoFrame");
+  if (demoFrame) demoFrame.hidden = !demoMode;
+  if (demoMode) {
+    applyDemoStatus();
+    renderCommands(commandCache);
+  } else {
+    reloadStream();
+  }
+}
 
-    const errorPanel = $("errorPanel");
-    if (status.error) {
-      errorPanel.hidden = false;
-      text("errorText", status.error);
-    } else {
-      errorPanel.hidden = true;
-      text("errorText", "");
-    }
-  } catch (error) {
-    setStateBadge("offline");
-    const errorPanel = $("errorPanel");
+function buildUrl(path) {
+  const prefix = API_BASE.replace(/\\/$/, "");
+  return `${prefix}/${path.replace(/^\\//, "")}`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function nowTime() {
+  return new Date().toLocaleTimeString("uk-UA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function applyStatus(status) {
+  setStateBadge(status.state);
+  text("transportBadge", status.transport);
+  text("sourceLine", status.source);
+  text("lastCommand", status.last_command);
+  text("commandDisplay", status.last_command);
+  text(
+    "lastCommandMeta",
+    `${status.last_command_gesture} / ${fmt(status.last_command_confidence)}`
+  );
+  text("selectedGesture", status.selected_gesture);
+  text("selectedConfidence", fmt(status.selected_confidence));
+  text("fps", fmt(status.fps, "", 1));
+  text("latency", fmt(status.latency_ms, " ms", 1));
+  text("handCount", status.hand_count);
+  text("frameIndex", status.frame_index);
+  text("staticGesture", `${status.static_gesture} / ${fmt(status.static_confidence)}`);
+  text("dynamicGesture", `${status.dynamic_gesture} / ${fmt(status.dynamic_confidence)}`);
+  text("updatedAt", status.updated_at);
+  renderGestureMap(status.selected_gesture);
+
+  const errorPanel = $("errorPanel");
+  if (status.error) {
     errorPanel.hidden = false;
-    text("errorText", error.message);
+    text("errorText", status.error);
+  } else {
+    errorPanel.hidden = true;
+    text("errorText", "");
+  }
+}
+
+function demoStatus() {
+  const [gesture, command, confidence, staticGesture, dynamicGesture] =
+    DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
+  return {
+    state: "demo",
+    source: "static-demo",
+    transport: "mock",
+    frame_index: 1200 + demoIndex * 18,
+    fps: 24.0 + (demoIndex % 3) * 0.7,
+    latency_ms: 36.0 + (demoIndex % 4) * 4.5,
+    hand_count: 1,
+    static_gesture: staticGesture,
+    static_confidence: staticGesture === "UNKNOWN" ? 0 : Math.max(0.78, confidence - 0.04),
+    dynamic_gesture: dynamicGesture,
+    dynamic_confidence: dynamicGesture === "UNKNOWN" ? 0 : confidence,
+    selected_gesture: gesture,
+    selected_confidence: confidence,
+    last_command: command,
+    last_command_gesture: gesture,
+    last_command_confidence: confidence,
+    command_count: commandCache.length,
+    error: "",
+    updated_at: nowTime(),
+  };
+}
+
+function applyDemoStatus() {
+  const status = demoStatus();
+  applyStatus(status);
+  if (!commandCache.length || commandCache[0].gesture !== status.selected_gesture) {
+    commandCache.unshift({
+      created_at: status.updated_at,
+      command: status.last_command,
+      gesture: status.selected_gesture,
+      confidence: Number(status.selected_confidence.toFixed(2)),
+      frame_index: status.frame_index,
+    });
+    commandCache = commandCache.slice(0, 10);
+  }
+  renderCommands(commandCache);
+  demoIndex += 1;
+}
+
+function reloadStream() {
+  const stream = $("stream");
+  if (stream) stream.src = `${buildUrl("stream.mjpg")}?t=${Date.now()}`;
+}
+
+async function refreshStatus() {
+  if (demoMode) return;
+  try {
+    const response = await fetch(buildUrl("api/status"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const status = await response.json();
+    lastBackendOk = true;
+    applyStatus(status);
+  } catch (error) {
+    if (lastBackendOk) setDemoMode(true);
+    lastBackendOk = false;
+    const status = demoStatus();
+    status.error = "Backend offline; demo data is active.";
+    applyStatus(status);
   }
 }
 
 async function refreshCommands() {
-  const response = await fetch("/api/commands", { cache: "no-store" });
-  const commands = await response.json();
+  if (demoMode) {
+    renderCommands(commandCache);
+    return;
+  }
+  const response = await fetch(buildUrl("api/commands"), { cache: "no-store" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  commandCache = await response.json();
+  renderCommands(commandCache);
+}
+
+function renderCommands(commands) {
   const body = $("commandRows");
   if (!body) return;
   if (!commands.length) {
@@ -1105,19 +1503,44 @@ async function refreshCommands() {
   }
   body.innerHTML = commands.map((entry) => `
     <tr>
-      <td>${entry.created_at}</td>
-      <td>${entry.command}</td>
-      <td>${entry.gesture}</td>
-      <td>${entry.confidence}</td>
-      <td>${entry.frame_index}</td>
+      <td>${escapeHtml(entry.created_at)}</td>
+      <td>${escapeHtml(entry.command)}</td>
+      <td>${escapeHtml(entry.gesture)}</td>
+      <td>${escapeHtml(entry.confidence)}</td>
+      <td>${escapeHtml(entry.frame_index)}</td>
     </tr>
   `).join("");
 }
 
+function renderGestureMap(activeGesture = "UNKNOWN") {
+  const node = $("gestureMap");
+  if (!node) return;
+  node.innerHTML = GESTURE_COMMANDS.map(([gesture, command]) => `
+    <div class="gesture-item ${gesture === activeGesture ? "active" : ""}">
+      <strong>${gesture}</strong>
+      <span>${command}</span>
+    </div>
+  `).join("");
+}
+
+function bindControls() {
+  const demoButton = $("demoToggle");
+  if (demoButton) demoButton.addEventListener("click", () => setDemoMode(!demoMode));
+  const reloadButton = $("reloadButton");
+  if (reloadButton) reloadButton.addEventListener("click", reloadStream);
+}
+
+bindControls();
+renderGestureMap();
 refreshStatus();
 refreshCommands();
 setInterval(refreshStatus, 500);
-setInterval(refreshCommands, 1000);
+setInterval(() => {
+  if (demoMode) applyDemoStatus();
+}, 1300);
+setInterval(() => {
+  if (!demoMode) refreshCommands().catch(() => undefined);
+}, 1000);
 """
 
 
