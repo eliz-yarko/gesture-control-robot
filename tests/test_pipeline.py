@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.capture.video_capture import CapturedFrame
 from src.config import AppConfig, CommandMappingConfig, DynamicClassifierConfig
 from src.domain import GestureID, GesturePrediction, RobotCommand
-from src.pipeline import GestureControlPipeline
+from src.pipeline import GestureControlPipeline, PipelineResult
 from src.recognition.hand_detector import HandDetection
 from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
 from src.transmission.mock_sender import MockCommandSender
@@ -60,7 +60,7 @@ def test_pipeline_keeps_emergency_stop_over_dynamic_candidate() -> None:
     assert result.command_event.command == RobotCommand.EMERGENCY_STOP
 
 
-def test_pipeline_allows_compatible_open_palm_wave_candidate() -> None:
+def test_pipeline_suppresses_static_commands_while_dynamic_motion_is_recording() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
@@ -69,20 +69,20 @@ def test_pipeline_allows_compatible_open_palm_wave_candidate() -> None:
                 dynamic_confirmation_frames=1,
             )
         ),
-        detector=_FakeDetector([HandDetection(_open_palm_landmarks(), "Right", 0.95)]),
+        detector=_SequenceDetector(_moving_open_palm_detections((0.0, 0.03, 0.07))),
         static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
         dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
         command_sender=sender,
     )
 
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=13))
+    results = _process_frames(pipeline, 3)
 
-    assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
-    assert result.command_event is not None
-    assert result.command_event.command == RobotCommand.MODE_TOGGLE
+    assert results[-1].dynamic_state == "motion_started"
+    assert results[-1].selected_prediction.gesture_id == GestureID.UNKNOWN
+    assert results[-1].command_event is None
 
 
-def test_pipeline_allows_compatible_dynamic_candidate_at_live_confidence() -> None:
+def test_pipeline_emits_dynamic_command_after_segment_finishes() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
@@ -91,83 +91,49 @@ def test_pipeline_allows_compatible_dynamic_candidate_at_live_confidence() -> No
                 dynamic_confirmation_frames=1,
             )
         ),
-        detector=_FakeDetector([HandDetection(_open_palm_landmarks(), "Right", 0.95)]),
+        detector=_SequenceDetector(_moving_open_palm_detections(_finished_motion_offsets())),
         static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
-        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.82),
-        command_sender=sender,
-    )
-
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=16))
-
-    assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
-    assert result.command_event is not None
-    assert result.command_event.command == RobotCommand.MODE_TOGGLE
-
-
-def test_pipeline_allows_dynamic_candidate_without_matching_static_pose() -> None:
-    sender = MockCommandSender()
-    pipeline = GestureControlPipeline(
-        config=AppConfig(
-            command_mapping=CommandMappingConfig(
-                static_confirmation_frames=1,
-                dynamic_confirmation_frames=1,
-            )
-        ),
-        detector=_FakeDetector([HandDetection(_index_point_landmarks(), "Right", 0.95)]),
-        static_classifier=_FakeStaticClassifier(GestureID.UNKNOWN, 0.0),
         dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
         command_sender=sender,
     )
 
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=14))
+    results = _process_frames(pipeline, len(_finished_motion_offsets()))
+    result = results[-1]
 
+    assert result.dynamic_state == "confirmed"
+    assert result.dynamic_prediction.gesture_id == GestureID.WAVE_LR
     assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
     assert result.command_event is not None
     assert result.command_event.command == RobotCommand.MODE_TOGGLE
+    assert sender.last_event == result.command_event
 
 
-def test_pipeline_allows_circle_candidate_when_static_pose_is_fist() -> None:
-    sender = MockCommandSender()
+def test_pipeline_confirms_dynamic_segment_for_configured_frame_count() -> None:
     pipeline = GestureControlPipeline(
         config=AppConfig(
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
-                dynamic_confirmation_frames=1,
+                dynamic_confirmation_frames=3,
             )
         ),
-        detector=_FakeDetector([HandDetection(_fist_landmarks(), "Right", 0.95)]),
-        static_classifier=_FakeStaticClassifier(GestureID.FIST, 0.86),
-        dynamic_classifier=_FakeDynamicClassifier(GestureID.CIRCLE, 0.98),
-        command_sender=sender,
-    )
-
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=19))
-
-    assert result.selected_prediction.gesture_id == GestureID.CIRCLE
-    assert result.command_event is not None
-    assert result.command_event.command == RobotCommand.ROTATE_360
-
-
-def test_pipeline_allows_circle_candidate_with_index_pose() -> None:
-    sender = MockCommandSender()
-    pipeline = GestureControlPipeline(
-        config=AppConfig(
-            command_mapping=CommandMappingConfig(
-                static_confirmation_frames=1,
-                dynamic_confirmation_frames=1,
-            )
+        detector=_SequenceDetector(
+            _moving_open_palm_detections((*_finished_motion_offsets(), 0.30, 0.30))
         ),
-        detector=_FakeDetector([HandDetection(_index_point_landmarks(), "Right", 0.95)]),
-        static_classifier=_FakeStaticClassifier(GestureID.UNKNOWN, 0.0),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
         dynamic_classifier=_FakeDynamicClassifier(GestureID.CIRCLE, 0.98),
-        command_sender=sender,
     )
 
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=15))
+    results = _process_frames(pipeline, len(_finished_motion_offsets()) + 2)
 
-    assert result.selected_prediction.gesture_id == GestureID.CIRCLE
-    assert result.command_event is not None
-    assert result.command_event.command == RobotCommand.ROTATE_360
+    assert results[-3].dynamic_state == "segment_classified"
+    assert results[-3].command_event is None
+    assert results[-3].command_state.stable_frames == 1
+    assert results[-2].dynamic_state == "confirming_dynamic"
+    assert results[-2].command_event is None
+    assert results[-2].command_state.stable_frames == 2
+    assert results[-1].dynamic_state == "confirmed"
+    assert results[-1].command_event is not None
+    assert results[-1].command_event.command == RobotCommand.ROTATE_360
 
 
 def test_pipeline_keeps_trajectory_during_short_detection_gap() -> None:
@@ -219,32 +185,34 @@ def test_pipeline_clears_trajectory_after_missing_detection_tolerance() -> None:
     assert len(trajectory_buffer) == 0
 
 
-def test_pipeline_emits_buffered_dynamic_command_during_detection_gap() -> None:
+def test_pipeline_emits_active_dynamic_segment_during_detection_gap() -> None:
     sender = MockCommandSender()
-    trajectory_buffer = TrajectoryBuffer(max_size=30)
-    for index, x in enumerate((0.3, 0.62, 0.28, 0.6, 0.3)):
-        trajectory_buffer.add_point(
-            TrajectoryPoint(
-                palm_center=(x, 0.4, 0.0),
-                index_tip=(x, 0.2, 0.0),
-                hand_size=0.25,
-                timestamp=float(index),
-            )
-        )
     pipeline = GestureControlPipeline(
-        detector=_FakeDetector([]),
-        trajectory_buffer=trajectory_buffer,
+        config=AppConfig(
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            )
+        ),
+        detector=_SequenceDetector(
+            [
+                *_moving_open_palm_detections((0.0, 0.03, 0.07, 0.12, 0.18)),
+                [],
+            ]
+        ),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
         command_sender=sender,
     )
 
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=19))
+    results = _process_frames(pipeline, 6)
+    result = results[-1]
 
     assert result.dynamic_prediction.gesture_id == GestureID.WAVE_LR
     assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
     assert result.command_event is not None
     assert result.command_event.command == RobotCommand.MODE_TOGGLE
     assert sender.last_event == result.command_event
-    assert len(trajectory_buffer) == 0
 
 
 def test_pipeline_clears_trajectory_after_dynamic_command() -> None:
@@ -256,17 +224,44 @@ def test_pipeline_clears_trajectory_after_dynamic_command() -> None:
                 dynamic_confirmation_frames=1,
             )
         ),
-        detector=_FakeDetector([HandDetection(_open_palm_landmarks(), "Right", 0.95)]),
+        detector=_SequenceDetector(_moving_open_palm_detections(_finished_motion_offsets())),
         static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
         dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.82),
         trajectory_buffer=trajectory_buffer,
     )
 
-    result = pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=18))
+    result = _process_frames(pipeline, len(_finished_motion_offsets()))[-1]
 
     assert result.command_event is not None
     assert result.command_event.gesture_id == GestureID.WAVE_LR
     assert len(trajectory_buffer) == 0
+
+
+def test_pipeline_applies_dynamic_cooldown_after_dynamic_command() -> None:
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            )
+        ),
+        detector=_SequenceDetector(
+            _moving_open_palm_detections((*_finished_motion_offsets(), 0.30))
+        ),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+    )
+
+    results = _process_frames(pipeline, len(_finished_motion_offsets()) + 1)
+    first = results[-2]
+    second = results[-1]
+
+    assert first.command_event is not None
+    assert first.command_event.gesture_id == GestureID.WAVE_LR
+    assert first.dynamic_state == "confirmed"
+    assert second.dynamic_prediction.gesture_id == GestureID.UNKNOWN
+    assert second.dynamic_prediction.metadata["reason"] == "dynamic_cooldown"
+    assert second.dynamic_state == "cooldown"
 
 
 class _FakeDetector:
@@ -276,6 +271,23 @@ class _FakeDetector:
 
     def detect(self, rgb_frame: object) -> list[HandDetection]:
         return self._detections
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _SequenceDetector:
+    def __init__(self, frames: list[list[HandDetection]]) -> None:
+        self._frames = frames
+        self._index = 0
+        self.closed = False
+
+    def detect(self, rgb_frame: object) -> list[HandDetection]:
+        if not self._frames:
+            return []
+        frame_index = min(self._index, len(self._frames) - 1)
+        self._index += 1
+        return self._frames[frame_index]
 
     def close(self) -> None:
         self.closed = True
@@ -295,6 +307,36 @@ class _FakeDynamicClassifier:
 
     def classify(self, buffer: object) -> GesturePrediction:
         return self._prediction
+
+
+def _process_frames(
+    pipeline: GestureControlPipeline,
+    frame_count: int,
+) -> list[PipelineResult]:
+    return [
+        pipeline.process(CapturedFrame(bgr_frame=object(), rgb_frame=object(), index=index))
+        for index in range(frame_count)
+    ]
+
+
+def _finished_motion_offsets() -> tuple[float, ...]:
+    return (0.0, 0.03, 0.07, 0.12, 0.18, 0.24, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30)
+
+
+def _moving_open_palm_detections(offsets: tuple[float, ...]) -> list[list[HandDetection]]:
+    return [
+        [HandDetection(_shift_landmarks(_open_palm_landmarks(), dx=offset), "Right", 0.95)]
+        for offset in offsets
+    ]
+
+
+def _shift_landmarks(
+    landmarks: list[tuple[float, float, float]],
+    *,
+    dx: float = 0.0,
+    dy: float = 0.0,
+) -> list[tuple[float, float, float]]:
+    return [(x + dx, y + dy, z) for x, y, z in landmarks]
 
 
 def _open_palm_landmarks() -> list[tuple[float, float, float]]:

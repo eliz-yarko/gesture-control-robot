@@ -71,15 +71,7 @@ class TrajectoryBuffer:
     ) -> None:
         """Extract trajectory features from landmarks and append them."""
 
-        landmarks = to_landmarks(raw_landmarks)
-        self.add_point(
-            TrajectoryPoint(
-                palm_center=palm_center(landmarks),
-                index_tip=landmarks[8],
-                hand_size=hand_scale(landmarks),
-                timestamp=timestamp if timestamp is not None else monotonic(),
-            )
-        )
+        self.add_point(trajectory_point_from_landmarks(raw_landmarks, timestamp=timestamp))
 
     def add_point(self, point: TrajectoryPoint) -> None:
         """Append a precomputed trajectory point."""
@@ -90,3 +82,18 @@ class TrajectoryBuffer:
         """Return buffered points as a list."""
 
         return list(self._points)
+
+
+def trajectory_point_from_landmarks(
+    raw_landmarks: LandmarkSequence,
+    timestamp: float | None = None,
+) -> TrajectoryPoint:
+    """Extract the compact dynamic-gesture point from one landmark frame."""
+
+    landmarks = to_landmarks(raw_landmarks)
+    return TrajectoryPoint(
+        palm_center=palm_center(landmarks),
+        index_tip=landmarks[8],
+        hand_size=hand_scale(landmarks),
+        timestamp=timestamp if timestamp is not None else monotonic(),
+    )

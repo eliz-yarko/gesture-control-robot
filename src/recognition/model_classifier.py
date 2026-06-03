@@ -141,7 +141,20 @@ class FallbackDynamicGestureClassifier:
         """Classify a trajectory, falling back when the model returns UNKNOWN."""
 
         prediction = cast(GesturePrediction, self._primary.classify(buffer))
+        if prediction.metadata.get("reason") == "trajectory_too_short":
+            return prediction
         if prediction.gesture_id != GestureID.UNKNOWN:
+            fallback_prediction = cast(GesturePrediction, self._fallback.classify(buffer))
+            if _should_prefer_dynamic_fallback(prediction, fallback_prediction):
+                return GesturePrediction(
+                    gesture_id=fallback_prediction.gesture_id,
+                    confidence=fallback_prediction.confidence,
+                    metadata={
+                        **fallback_prediction.metadata,
+                        "overrode_model": prediction.gesture_id.name,
+                        "model_confidence": prediction.confidence,
+                    },
+                )
             return prediction
         fallback_prediction = cast(GesturePrediction, self._fallback.classify(buffer))
         return GesturePrediction(
@@ -152,6 +165,19 @@ class FallbackDynamicGestureClassifier:
                 "fallback_after": prediction.metadata.get("reason", "model_unknown"),
             },
         )
+
+
+def _should_prefer_dynamic_fallback(
+    model_prediction: GesturePrediction,
+    fallback_prediction: GesturePrediction,
+) -> bool:
+    if fallback_prediction.gesture_id == GestureID.UNKNOWN:
+        return False
+    if fallback_prediction.confidence < 0.75:
+        return False
+    if model_prediction.gesture_id != GestureID.CIRCLE:
+        return False
+    return fallback_prediction.gesture_id in {GestureID.WAVE_LR, GestureID.PULL_TOWARD}
 
 
 def _load_bundle(

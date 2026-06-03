@@ -13,35 +13,9 @@
         <h1>Gesture Control Console</h1>
         <p id="sourceLine">camera:0</p>
       </div>
-      <div class="topbar-actions">
-        <input
-          id="apiBaseInput"
-          class="api-input"
-          type="url"
-          inputmode="url"
-          placeholder="Backend URL"
-          aria-label="Backend URL"
-        >
-        <div class="state-strip">
-          <span id="stateBadge" class="badge badge-muted">starting</span>
-          <span id="transportBadge" class="badge">mock</span>
-        </div>
-        <div class="button-row">
-          <button
-            id="browserCameraToggle"
-            class="icon-button"
-            type="button"
-            title="Use this browser camera"
-          >
-            Camera
-          </button>
-          <button id="demoToggle" class="icon-button" type="button" title="Toggle demo data">
-            Demo
-          </button>
-          <button id="reloadButton" class="icon-button" type="button" title="Reload stream">
-            Reload
-          </button>
-        </div>
+      <div class="state-strip">
+        <span id="stateBadge" class="badge badge-muted">starting</span>
+        <span id="transportBadge" class="badge">mock</span>
       </div>
     </header>
 
@@ -51,29 +25,90 @@
           <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
           <video id="browserVideo" class="browser-video" autoplay playsinline muted hidden></video>
           <canvas id="captureCanvas" hidden></canvas>
-          <div id="demoFrame" class="demo-frame" hidden>
-            <div class="demo-hand" aria-hidden="true">
-              <span class="finger finger-thumb"></span>
-              <span class="finger finger-index"></span>
-              <span class="finger finger-middle"></span>
-              <span class="finger finger-ring"></span>
-              <span class="finger finger-pinky"></span>
-              <span class="palm"></span>
-            </div>
-          </div>
+          <button id="startVideoButton" class="video-start-button" type="button">
+            Start video
+          </button>
         </div>
+        <p class="video-access-note">
+          Camera/video access is required to recognize gestures and control the robot.
+        </p>
         <div class="frame-strip">
           <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
-          <div><span>Command</span><strong id="lastCommand">UNKNOWN</strong></div>
+          <div><span>Last command</span><strong id="lastCommand">UNKNOWN</strong></div>
           <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
+          <div><span>Dynamic state</span><strong id="dynamicState">idle</strong></div>
         </div>
       </section>
 
       <aside class="status-rail">
+        <section class="panel control-panel">
+          <span class="eyebrow">control</span>
+          <div class="control-buttons">
+            <button id="sideStartButton" class="primary-button" type="button">Start</button>
+            <button id="stopVideoButton" class="secondary-button" type="button">Stop</button>
+            <button id="reloadButton" class="secondary-button" type="button">Reload</button>
+          </div>
+          <label class="field-label">
+            <span>Backend URL</span>
+            <input
+              id="apiBaseInput"
+              class="api-input"
+              type="url"
+              inputmode="url"
+              placeholder="same-origin"
+              aria-label="Backend URL"
+            >
+          </label>
+        </section>
+
+        <section class="panel robot-panel">
+          <span class="eyebrow">robot transmission</span>
+          <strong id="robotTransferState">WAITING</strong>
+          <div class="robot-grid">
+            <div><span>Transport</span><b id="transportText">mock</b></div>
+            <div><span>Sent</span><b id="robotCommandCount">0</b></div>
+            <div><span>Last gesture</span><b id="robotLastGesture">UNKNOWN</b></div>
+          </div>
+        </section>
+
         <section class="panel command-panel">
-          <span class="eyebrow">confirmed command</span>
+          <span class="eyebrow">last confirmed command</span>
           <strong id="commandDisplay">UNKNOWN</strong>
           <span id="lastCommandMeta">UNKNOWN / 0.00</span>
+        </section>
+
+        <section class="panel confirmation-panel">
+          <span class="eyebrow">confirmation</span>
+          <strong id="candidateCommand">UNKNOWN</strong>
+          <span id="candidateGesture">UNKNOWN / 0.00</span>
+          <div class="progress-track" aria-hidden="true">
+            <span id="confirmationProgressBar"></span>
+          </div>
+          <span id="confirmationProgressText">0 / 0 frames</span>
+        </section>
+
+        <section class="panel settings-panel">
+          <div class="section-header compact-header">
+            <h2>Confirmation frames</h2>
+            <span id="settingsStatus">saved</span>
+          </div>
+          <div class="settings-grid">
+            <label>
+              <span>Static</span>
+              <input id="staticFramesInput" type="number" min="1" max="12" step="1" value="5">
+            </label>
+            <label>
+              <span>Dynamic</span>
+              <input id="dynamicFramesInput" type="number" min="1" max="12" step="1" value="1">
+            </label>
+            <label>
+              <span>Emergency</span>
+              <input id="emergencyFramesInput" type="number" min="1" max="12" step="1" value="3">
+            </label>
+          </div>
+          <button id="saveSettingsButton" class="primary-button full-button" type="button">
+            Apply
+          </button>
         </section>
 
         <section class="metrics-grid">
@@ -86,6 +121,22 @@
         <section class="panel split-panel">
           <div><span>Static</span><strong id="staticGesture">UNKNOWN</strong></div>
           <div><span>Dynamic</span><strong id="dynamicGesture">UNKNOWN</strong></div>
+        </section>
+
+        <section class="panel pose-panel">
+          <div class="section-header compact-header">
+            <h2>Hand pose</h2>
+            <span id="poseDirection">--</span>
+          </div>
+          <div id="fingerStates" class="finger-states"></div>
+        </section>
+
+        <section class="panel landmarks-panel">
+          <div class="section-header compact-header">
+            <h2>Landmark points</h2>
+            <span id="landmarkCount">0 / 21</span>
+          </div>
+          <div id="landmarkList" class="landmark-list"></div>
         </section>
 
         <section class="panel error-panel" id="errorPanel" hidden>

@@ -49,11 +49,18 @@ class DynamicClassifierConfig:
     max_vertical_drift: float = 0.14
     min_wave_direction_changes: int = 2
     min_circle_radius: float = 0.04
-    max_circle_radius_cv: float = 0.45
-    min_circle_angle_span: float = 5.0
-    min_pull_scale_growth: float = 0.2
+    max_circle_radius_cv: float = 0.65
+    min_circle_angle_span: float = 4.5
+    max_circle_angle_span: float = 7.4
+    min_pull_scale_growth: float = 0.10
     min_confidence: float = 0.6
     selection_min_confidence: float = 0.75
+    motion_start_threshold: float = 0.02
+    motion_end_threshold: float = 0.012
+    motion_start_frames: int = 2
+    motion_end_frames: int = 3
+    min_dynamic_segment_points: int = 5
+    max_dynamic_segment_points: int = 36
 
 
 @dataclass(frozen=True)

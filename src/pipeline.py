@@ -7,14 +7,15 @@ from typing import Protocol
 
 from src.calibration.adaptive_calibrator import AdaptiveCalibrator
 from src.capture.video_capture import CapturedFrame
-from src.config import AppConfig
+from src.config import AppConfig, CommandMappingConfig
 from src.domain import CommandEvent, GestureID, GesturePrediction
 from src.interpretation.command_mapper import CommandConfirmationState, CommandMapper
 from src.recognition.dynamic_classifier import DynamicGestureClassifier
+from src.recognition.dynamic_segmenter import DynamicGestureSegmenter
 from src.recognition.gesture_pose import StaticPoseAnalysis, analyze_static_pose
 from src.recognition.hand_detector import HandDetection, HandDetector
 from src.recognition.static_classifier import StaticGestureClassifier
-from src.recognition.trajectory_buffer import TrajectoryBuffer
+from src.recognition.trajectory_buffer import TrajectoryBuffer, trajectory_point_from_landmarks
 from src.transmission.base_sender import CommandSender
 from src.utils.geometry import LandmarkSequence
 
@@ -57,6 +58,7 @@ class PipelineResult:
         default_factory=CommandConfirmationState.unknown
     )
     pose_analysis: StaticPoseAnalysis | None = None
+    dynamic_state: str = "idle"
 
 
 class GestureControlPipeline:
@@ -90,6 +92,10 @@ class GestureControlPipeline:
         self._command_sender = command_sender
         self._calibrator = calibrator
         self._missing_detection_frames = 0
+        self._dynamic_cooldown_frames = 0
+        self._dynamic_segmenter = DynamicGestureSegmenter(self._config.dynamic_classifier)
+        self._pending_dynamic_prediction: GesturePrediction | None = None
+        self._pending_dynamic_frames_remaining = 0
 
     def process(self, frame: CapturedFrame) -> PipelineResult:
         """Process one captured frame and optionally send a confirmed command."""
@@ -102,12 +108,18 @@ class GestureControlPipeline:
         detection = max(detections, key=lambda item: item.score)
         pose_analysis = analyze_static_pose(detection.landmarks, self._config.static_classifier)
         static_prediction = self._static_classifier.classify(detection.landmarks)
-        self._trajectory_buffer.add_landmarks(detection.landmarks, timestamp=frame.timestamp)
-        dynamic_prediction = self._dynamic_classifier.classify(self._trajectory_buffer)
-        selected_prediction = _select_prediction(
+        point = trajectory_point_from_landmarks(detection.landmarks, timestamp=frame.timestamp)
+        self._trajectory_buffer.add_point(point)
+        segment_update = self._dynamic_segmenter.update(point)
+        dynamic_prediction, dynamic_state = self._dynamic_prediction_from_segment(
+            segment_update.segment,
+            default_state=segment_update.state,
+        )
+        selected_prediction = _select_prediction_for_motion_state(
             static_prediction,
             dynamic_prediction,
             dynamic_min_confidence=self._config.dynamic_classifier.selection_min_confidence,
+            dynamic_state=dynamic_state,
         )
         if self._calibrator is not None:
             selected_prediction = self._calibrator.adjust_prediction(
@@ -120,7 +132,9 @@ class GestureControlPipeline:
         if command_event is not None and self._command_sender is not None:
             self._command_sender.send(command_event)
         if command_event is not None and command_event.gesture_id.is_dynamic:
-            self._trajectory_buffer.clear()
+            self._reset_dynamic_tracking()
+            self._begin_dynamic_cooldown()
+            dynamic_state = "confirmed"
 
         return PipelineResult(
             frame_index=frame.index,
@@ -131,16 +145,22 @@ class GestureControlPipeline:
             command_event=command_event,
             command_state=command_state,
             pose_analysis=pose_analysis,
+            dynamic_state=dynamic_state,
         )
 
     def _process_missing_detection(self, frame: CapturedFrame) -> PipelineResult:
         self._missing_detection_frames += 1
         unknown = GesturePrediction.unknown("no_hand_detected")
-        dynamic_prediction = self._dynamic_classifier.classify(self._trajectory_buffer)
-        selected_prediction = _select_prediction(
+        segment_update = self._dynamic_segmenter.missing()
+        dynamic_prediction, dynamic_state = self._dynamic_prediction_from_segment(
+            segment_update.segment,
+            default_state=segment_update.state,
+        )
+        selected_prediction = _select_prediction_for_motion_state(
             unknown,
             dynamic_prediction,
             dynamic_min_confidence=self._config.dynamic_classifier.selection_min_confidence,
+            dynamic_state=dynamic_state,
         )
         command_event = self._command_mapper.update(selected_prediction)
         command_state = self._command_mapper.confirmation_state
@@ -148,13 +168,15 @@ class GestureControlPipeline:
         if command_event is not None and self._command_sender is not None:
             self._command_sender.send(command_event)
         if command_event is not None and command_event.gesture_id.is_dynamic:
-            self._trajectory_buffer.clear()
+            self._reset_dynamic_tracking()
+            self._begin_dynamic_cooldown()
             self._missing_detection_frames = 0
+            dynamic_state = "confirmed"
         elif (
             self._missing_detection_frames
             > self._config.dynamic_classifier.missing_detection_tolerance_frames
         ):
-            self._trajectory_buffer.clear()
+            self._reset_dynamic_tracking()
 
         return PipelineResult(
             frame_index=frame.index,
@@ -165,12 +187,76 @@ class GestureControlPipeline:
             command_event=command_event,
             command_state=command_state,
             pose_analysis=None,
+            dynamic_state=dynamic_state,
         )
 
     def close(self) -> None:
         """Close resources owned by the detector."""
 
         self._detector.close()
+
+    def configure_command_mapping(self, config: CommandMappingConfig) -> None:
+        """Apply runtime command confirmation settings."""
+
+        self._command_mapper.configure(config)
+
+    def _begin_dynamic_cooldown(self) -> None:
+        self._dynamic_cooldown_frames = max(
+            2,
+            self._config.dynamic_classifier.min_window_points,
+        )
+
+    def _dynamic_prediction_from_segment(
+        self,
+        segment: TrajectoryBuffer | None,
+        *,
+        default_state: str,
+    ) -> tuple[GesturePrediction, str]:
+        if self._dynamic_cooldown_frames > 0:
+            self._dynamic_cooldown_frames -= 1
+            self._reset_dynamic_tracking(clear_cooldown=False)
+            return GesturePrediction.unknown("dynamic_cooldown"), "cooldown"
+
+        pending = self._consume_pending_dynamic_prediction()
+        if pending is not None:
+            return pending, "confirming_dynamic"
+
+        if segment is None:
+            if default_state in {"motion_started", "recording_dynamic"}:
+                return GesturePrediction.unknown("dynamic_motion_in_progress"), default_state
+            return GesturePrediction.unknown(default_state), default_state
+
+        prediction = self._dynamic_classifier.classify(segment)
+        if (
+            prediction.gesture_id != GestureID.UNKNOWN
+            and prediction.confidence >= self._config.dynamic_classifier.selection_min_confidence
+        ):
+            self._hold_dynamic_prediction(prediction)
+            return prediction, "segment_classified"
+        return GesturePrediction.unknown("dynamic_segment_rejected"), "segment_rejected"
+
+    def _hold_dynamic_prediction(self, prediction: GesturePrediction) -> None:
+        required_frames = self._config.command_mapping.dynamic_confirmation_frames
+        self._pending_dynamic_prediction = prediction
+        self._pending_dynamic_frames_remaining = max(0, required_frames - 1)
+
+    def _consume_pending_dynamic_prediction(self) -> GesturePrediction | None:
+        if self._pending_dynamic_prediction is None:
+            return None
+        prediction = self._pending_dynamic_prediction
+        if self._pending_dynamic_frames_remaining <= 0:
+            self._pending_dynamic_prediction = None
+            return None
+        self._pending_dynamic_frames_remaining -= 1
+        return prediction
+
+    def _reset_dynamic_tracking(self, *, clear_cooldown: bool = True) -> None:
+        self._trajectory_buffer.clear()
+        self._dynamic_segmenter.reset()
+        self._pending_dynamic_prediction = None
+        self._pending_dynamic_frames_remaining = 0
+        if clear_cooldown:
+            self._dynamic_cooldown_frames = 0
 
 
 def _select_prediction(
@@ -190,6 +276,39 @@ def _select_prediction(
         return static_prediction
 
     return dynamic_prediction
+
+
+def _select_prediction_for_motion_state(
+    static_prediction: GesturePrediction,
+    dynamic_prediction: GesturePrediction,
+    dynamic_min_confidence: float,
+    dynamic_state: str,
+) -> GesturePrediction:
+    """Select a command candidate while suppressing static commands during motion."""
+
+    if _is_emergency_stop_candidate(static_prediction):
+        return static_prediction
+
+    if dynamic_state in {
+        "motion_started",
+        "recording_dynamic",
+        "cooldown",
+        "confirming_dynamic",
+        "segment_classified",
+        "segment_rejected",
+    }:
+        if (
+            dynamic_prediction.gesture_id != GestureID.UNKNOWN
+            and dynamic_prediction.confidence >= dynamic_min_confidence
+        ):
+            return dynamic_prediction
+        return GesturePrediction.unknown(dynamic_prediction.metadata.get("reason", dynamic_state))
+
+    return _select_prediction(
+        static_prediction,
+        dynamic_prediction,
+        dynamic_min_confidence=dynamic_min_confidence,
+    )
 
 
 def _is_emergency_stop_candidate(static_prediction: GesturePrediction) -> bool:

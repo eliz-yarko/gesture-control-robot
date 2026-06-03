@@ -3,16 +3,7 @@ const $ = (id) => document.getElementById(id);
 
 const queryParams = new URLSearchParams(window.location.search);
 let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
-const DEMO_SEQUENCE = [
-  ["OPEN_PALM", "STOP", 0.96, "OPEN_PALM", "UNKNOWN"],
-  ["FIST", "FORWARD", 0.91, "FIST", "UNKNOWN"],
-  ["INDEX_LEFT", "TURN_LEFT", 0.88, "INDEX_LEFT", "UNKNOWN"],
-  ["INDEX_RIGHT", "TURN_RIGHT", 0.90, "INDEX_RIGHT", "UNKNOWN"],
-  ["THUMB_UP", "START", 0.94, "THUMB_UP", "UNKNOWN"],
-  ["WAVE_LR", "MODE_TOGGLE", 0.86, "OPEN_PALM", "WAVE_LR"],
-  ["CIRCLE", "ROTATE_360", 0.84, "UNKNOWN", "CIRCLE"],
-  ["PULL_TOWARD", "APPROACH_OPERATOR", 0.82, "UNKNOWN", "PULL_TOWARD"],
-];
+const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;
 const GESTURE_COMMANDS = [
   ["OPEN_PALM", "STOP"],
   ["FIST", "FORWARD"],
@@ -28,15 +19,21 @@ const GESTURE_COMMANDS = [
   ["CIRCLE", "ROTATE_360"],
   ["PULL_TOWARD", "APPROACH_OPERATOR"],
 ];
+const FINGER_LABELS = [
+  ["thumb", "Thumb"],
+  ["index", "Index"],
+  ["middle", "Middle"],
+  ["ring", "Ring"],
+  ["pinky", "Pinky"],
+];
 
-let demoMode = false;
 let browserCameraMode = false;
-let demoIndex = 0;
 let commandCache = [];
-let lastBackendOk = true;
 let browserStream = null;
 let frameTimer = null;
 let frameInFlight = false;
+let currentSource = "";
+let settingsDirty = false;
 
 function text(id, value) {
   const node = $(id);
@@ -55,9 +52,19 @@ function setStateBadge(state) {
   badge.textContent = state;
   badge.className = "badge";
   if (state === "running") badge.classList.add("badge-running");
-  else if (state === "demo") badge.classList.add("badge-demo");
   else if (state === "error") badge.classList.add("badge-error");
   else badge.classList.add("badge-muted");
+}
+
+function setVideoStarted(started) {
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.toggle("video-started", Boolean(started));
+  const startButton = $("startVideoButton");
+  if (startButton) startButton.textContent = started ? "Video running" : "Start video";
+  const sideStartButton = $("sideStartButton");
+  if (sideStartButton) sideStartButton.textContent = started ? "Running" : "Start";
+  const stopButton = $("stopVideoButton");
+  if (stopButton) stopButton.disabled = !browserCameraMode;
 }
 
 function buildUrl(path) {
@@ -90,9 +97,100 @@ function nowTime() {
   });
 }
 
+function recognitionLabel(gesture, confidence, minConfidence) {
+  const value = `${gesture} / ${fmt(confidence)}`;
+  if (gesture !== "UNKNOWN" && confidence < minConfidence) return `${value} low`;
+  return value;
+}
+
+function reasonLabel(reason) {
+  if (!reason) return "";
+  return String(reason).replaceAll("_", " ");
+}
+
+function applyConfirmation(status) {
+  const minConfidence = status.command_min_confidence ?? 0.65;
+  const gesture = status.command_candidate_gesture || "UNKNOWN";
+  const command = status.command_candidate_command || "UNKNOWN";
+  const confidence = status.command_candidate_confidence ?? 0;
+  const stableFrames = status.command_stable_frames || 0;
+  const requiredFrames = status.command_required_frames || 0;
+  const progress = Math.max(0, Math.min(1, status.command_progress || 0));
+  const reason = status.command_blocked_reason || "";
+  const panel = document.querySelector(".confirmation-panel");
+  if (panel) {
+    panel.classList.toggle("ready", Boolean(status.command_ready));
+    panel.classList.toggle("blocked", reason === "confidence_below_threshold");
+  }
+  text("candidateCommand", command);
+  text("candidateGesture", `${gesture} / ${fmt(confidence)}`);
+  const bar = $("confirmationProgressBar");
+  if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
+  if (reason === "confidence_below_threshold") {
+    text("confirmationProgressText", `${fmt(confidence)} < ${fmt(minConfidence)} threshold`);
+  } else if (reason === "repeat_suppressed") {
+    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames, already sent`);
+  } else if (requiredFrames > 0) {
+    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames`);
+  } else {
+    text("confirmationProgressText", reasonLabel(reason) || "0 / 0 frames");
+  }
+}
+
+function renderPoseDiagnostics(status) {
+  const states = status.finger_states || {};
+  const expected = (status.expected_pose && status.expected_pose.finger_states) || {};
+  const directions = status.pose_directions || {};
+  const node = $("fingerStates");
+  if (!node) return;
+  node.innerHTML = FINGER_LABELS.map(([key, label]) => {
+    const actual = states[key];
+    const target = expected[key];
+    const actualText = actual === true ? "open" : actual === false ? "closed" : "--";
+    const targetText = target === true ? "open" : target === false ? "closed" : "any";
+    const matched = target === null || target === undefined || actual === target;
+    return `
+      <div class="finger-row">
+        <strong>${label}</strong>
+        <span>${actualText} / ${targetText}</span>
+        <span class="${matched ? "match" : "mismatch"}">${matched ? "OK" : "NO"}</span>
+      </div>
+    `;
+  }).join("");
+
+  const parts = [];
+  if (directions.thumb) parts.push(`thumb ${directions.thumb}`);
+  if (directions.index) parts.push(`index ${directions.index}`);
+  if (directions.ok_tip_distance !== undefined) {
+    parts.push(`ok ${fmt(directions.ok_tip_distance)}`);
+  }
+  text("poseDirection", parts.length ? parts.join(" | ") : "--");
+}
+
+function renderLandmarks(landmarks) {
+  const points = Array.isArray(landmarks) ? landmarks : [];
+  text("landmarkCount", `${points.length} / 21`);
+  const node = $("landmarkList");
+  if (!node) return;
+  if (!points.length) {
+    node.innerHTML = '<div class="empty">No hand points</div>';
+    return;
+  }
+  node.innerHTML = points.map((point) => `
+    <div class="landmark-point">
+      <strong>#${escapeHtml(point.id)}</strong>
+      x ${escapeHtml(point.x)}<br>
+      y ${escapeHtml(point.y)}<br>
+      z ${escapeHtml(point.z)}
+    </div>
+  `).join("");
+}
+
 function applyStatus(status) {
+  currentSource = status.source || "";
   setStateBadge(status.state);
   text("transportBadge", status.transport);
+  text("transportText", status.transport);
   text("sourceLine", status.source);
   text("lastCommand", status.last_command);
   text("commandDisplay", status.last_command);
@@ -102,14 +200,33 @@ function applyStatus(status) {
   );
   text("selectedGesture", status.selected_gesture);
   text("selectedConfidence", fmt(status.selected_confidence));
+  text("dynamicState", status.dynamic_state || "idle");
+  text("robotCommandCount", status.command_count);
+  text("robotLastGesture", status.last_command_gesture);
+  text(
+    "robotTransferState",
+    status.last_command && status.last_command !== "UNKNOWN" ? "SENT" : "WAITING"
+  );
   text("fps", fmt(status.fps, "", 1));
   text("latency", fmt(status.latency_ms, " ms", 1));
   text("handCount", status.hand_count);
   text("frameIndex", status.frame_index);
-  text("staticGesture", `${status.static_gesture} / ${fmt(status.static_confidence)}`);
-  text("dynamicGesture", `${status.dynamic_gesture} / ${fmt(status.dynamic_confidence)}`);
+  const minConfidence = status.command_min_confidence ?? 0.65;
+  text(
+    "staticGesture",
+    recognitionLabel(status.static_gesture, status.static_confidence, minConfidence)
+  );
+  text(
+    "dynamicGesture",
+    recognitionLabel(status.dynamic_gesture, status.dynamic_confidence, minConfidence)
+  );
   text("updatedAt", status.updated_at);
+  applyConfirmation(status);
+  renderPoseDiagnostics(status);
+  renderLandmarks(status.landmarks);
   renderGestureMap(status.selected_gesture);
+  if (!settingsDirty) applySettings(settingsPayloadFromStatus(status));
+  if (!browserCameraMode) setVideoStarted(status.state === "running");
 
   const errorPanel = $("errorPanel");
   if (status.error) {
@@ -121,93 +238,87 @@ function applyStatus(status) {
   }
 }
 
-function demoStatus() {
-  const [gesture, command, confidence, staticGesture, dynamicGesture] =
-    DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
-  return {
-    state: "demo",
-    source: "static-demo",
-    transport: "mock",
-    frame_index: 1200 + demoIndex * 18,
-    fps: 24.0 + (demoIndex % 3) * 0.7,
-    latency_ms: 36.0 + (demoIndex % 4) * 4.5,
-    hand_count: 1,
-    static_gesture: staticGesture,
-    static_confidence: staticGesture === "UNKNOWN" ? 0 : Math.max(0.78, confidence - 0.04),
-    dynamic_gesture: dynamicGesture,
-    dynamic_confidence: dynamicGesture === "UNKNOWN" ? 0 : confidence,
-    selected_gesture: gesture,
-    selected_confidence: confidence,
-    last_command: command,
-    last_command_gesture: gesture,
-    last_command_confidence: confidence,
-    command_count: commandCache.length,
-    error: "",
-    updated_at: nowTime(),
-  };
-}
-
-function setDemoMode(enabled) {
-  if (enabled && browserCameraMode) stopBrowserCamera();
-  demoMode = enabled;
-  const button = $("demoToggle");
-  if (button) button.classList.toggle("active", demoMode);
-  const stage = document.querySelector(".video-stage");
-  if (stage) stage.classList.toggle("demo-active", demoMode);
-  const demoFrame = $("demoFrame");
-  if (demoFrame) demoFrame.hidden = !demoMode;
-  if (demoMode) {
-    applyDemoStatus();
-    renderCommands(commandCache);
-  } else {
-    reloadStream();
-  }
-}
-
-function applyDemoStatus() {
-  const status = demoStatus();
-  applyStatus(status);
-  if (!commandCache.length || commandCache[0].gesture !== status.selected_gesture) {
-    commandCache.unshift({
-      created_at: status.updated_at,
-      command: status.last_command,
-      gesture: status.selected_gesture,
-      confidence: Number(status.selected_confidence.toFixed(2)),
-      frame_index: status.frame_index,
-    });
-    commandCache = commandCache.slice(0, 10);
-  }
-  renderCommands(commandCache);
-  demoIndex += 1;
-}
-
 function reloadStream() {
   const stream = $("stream");
   if (stream) stream.src = `${buildUrl("stream.mjpg")}?t=${Date.now()}`;
 }
 
 async function refreshStatus() {
-  if (demoMode || browserCameraMode) return;
+  if (browserCameraMode) return;
   try {
     const response = await fetch(buildUrl("api/status"), { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const status = await response.json();
-    lastBackendOk = true;
     applyStatus(status);
   } catch (error) {
-    if (lastBackendOk) setDemoMode(true);
-    lastBackendOk = false;
-    const status = demoStatus();
-    status.error = "Backend offline; demo data is active.";
-    applyStatus(status);
+    showRuntimeError(
+      cameraAccessMessage("Backend is unavailable. Start the video backend.")
+    );
+  }
+}
+
+function settingsPayloadFromStatus(status) {
+  return {
+    static_confirmation_frames: status.static_confirmation_frames,
+    dynamic_confirmation_frames: status.dynamic_confirmation_frames,
+    emergency_confirmation_frames: status.emergency_confirmation_frames,
+  };
+}
+
+function applySettings(settings) {
+  const pairs = [
+    ["staticFramesInput", settings.static_confirmation_frames],
+    ["dynamicFramesInput", settings.dynamic_confirmation_frames],
+    ["emergencyFramesInput", settings.emergency_confirmation_frames],
+  ];
+  for (const [id, value] of pairs) {
+    const input = $(id);
+    if (input && document.activeElement !== input && value !== undefined) {
+      input.value = value;
+    }
+  }
+  if (!settingsDirty) text("settingsStatus", "saved");
+}
+
+function readSettings() {
+  return {
+    static_confirmation_frames: Number($("staticFramesInput")?.value || 1),
+    dynamic_confirmation_frames: Number($("dynamicFramesInput")?.value || 1),
+    emergency_confirmation_frames: Number($("emergencyFramesInput")?.value || 1),
+  };
+}
+
+async function loadSettings() {
+  try {
+    const response = await fetch(buildUrl("api/settings"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    applySettings(await response.json());
+  } catch (error) {
+    text("settingsStatus", "offline");
+  }
+}
+
+async function saveSettings() {
+  syncApiBaseFromInput();
+  text("settingsStatus", "saving");
+  try {
+    const response = await fetch(buildUrl("api/settings"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(readSettings()),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    settingsDirty = false;
+    applySettings(payload);
+    text("settingsStatus", "saved");
+  } catch (error) {
+    text("settingsStatus", "error");
+    showRuntimeError(error.message);
   }
 }
 
 async function refreshCommands() {
-  if (demoMode) {
-    renderCommands(commandCache);
-    return;
-  }
   const response = await fetch(buildUrl("api/commands"), { cache: "no-store" });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   commandCache = await response.json();
@@ -215,10 +326,9 @@ async function refreshCommands() {
 }
 
 async function startBrowserCamera() {
-  setDemoMode(false);
   syncApiBaseFromInput();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showRuntimeError("Browser camera API is unavailable on this page.");
+    showRuntimeError(cameraAccessMessage("Browser camera API is unavailable on this page."));
     return;
   }
   try {
@@ -235,18 +345,15 @@ async function startBrowserCamera() {
     video.srcObject = browserStream;
     await video.play();
     browserCameraMode = true;
-    const button = $("browserCameraToggle");
-    if (button) button.classList.add("active");
     const stage = document.querySelector(".video-stage");
     if (stage) stage.classList.add("browser-active");
     video.hidden = false;
-    const demoFrame = $("demoFrame");
-    if (demoFrame) demoFrame.hidden = true;
+    setVideoStarted(true);
     setStateBadge("camera");
     text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
-    frameTimer = window.setInterval(captureAndSendFrame, 220);
+    frameTimer = window.setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS);
   } catch (error) {
-    showRuntimeError(error.message);
+    showRuntimeError(cameraAccessMessage(error));
   }
 }
 
@@ -266,11 +373,30 @@ function stopBrowserCamera() {
     video.srcObject = null;
     video.hidden = true;
   }
-  const button = $("browserCameraToggle");
-  if (button) button.classList.remove("active");
   const stage = document.querySelector(".video-stage");
   if (stage) stage.classList.remove("browser-active");
+  setVideoStarted(false);
   reloadStream();
+}
+
+async function startVideo() {
+  syncApiBaseFromInput();
+  if (!currentSource || currentSource === "browser-camera" || browserCameraMode) {
+    await startBrowserCamera();
+    return;
+  }
+  setVideoStarted(true);
+  reloadStream();
+  refreshStatus();
+  refreshCommands().catch(() => undefined);
+}
+
+function stopVideo() {
+  if (browserCameraMode) {
+    stopBrowserCamera();
+    return;
+  }
+  setVideoStarted(false);
 }
 
 async function captureAndSendFrame() {
@@ -296,6 +422,10 @@ async function captureAndSendFrame() {
     if (!response.ok) throw new Error(`Frame API HTTP ${response.status}`);
     const payload = await response.json();
     if (payload.status) applyStatus(payload.status);
+    if (payload.frame) {
+      const stream = $("stream");
+      if (stream) stream.src = payload.frame;
+    }
     if (payload.commands) {
       commandCache = payload.commands;
       renderCommands(commandCache);
@@ -343,6 +473,19 @@ function showRuntimeError(message) {
   text("errorText", message);
 }
 
+function cameraAccessMessage(error) {
+  const detail = typeof error === "string" ? error : error?.message || "";
+  if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
+    return [
+      "Camera/video access is required to control the robot.",
+      "Grant video permission and try again.",
+    ].join(" ");
+  }
+  return detail
+    ? `Camera/video access is required to control the robot. ${detail}`
+    : "Camera/video access is required to control the robot.";
+}
+
 function bindControls() {
   const apiInput = $("apiBaseInput");
   if (apiInput) {
@@ -350,27 +493,33 @@ function bindControls() {
     apiBase = apiInput.value.trim();
     apiInput.addEventListener("change", syncApiBaseFromInput);
   }
-  const cameraButton = $("browserCameraToggle");
-  if (cameraButton) {
-    cameraButton.addEventListener("click", () => {
-      if (browserCameraMode) stopBrowserCamera();
-      else startBrowserCamera();
-    });
-  }
-  const demoButton = $("demoToggle");
-  if (demoButton) demoButton.addEventListener("click", () => setDemoMode(!demoMode));
+  const startVideoButton = $("startVideoButton");
+  if (startVideoButton) startVideoButton.addEventListener("click", startVideo);
+  const sideStartButton = $("sideStartButton");
+  if (sideStartButton) sideStartButton.addEventListener("click", startVideo);
+  const stopVideoButton = $("stopVideoButton");
+  if (stopVideoButton) stopVideoButton.addEventListener("click", stopVideo);
   const reloadButton = $("reloadButton");
   if (reloadButton) reloadButton.addEventListener("click", reloadStream);
+  for (const id of ["staticFramesInput", "dynamicFramesInput", "emergencyFramesInput"]) {
+    const input = $(id);
+    if (input) {
+      input.addEventListener("input", () => {
+        settingsDirty = true;
+        text("settingsStatus", "unsaved");
+      });
+    }
+  }
+  const saveSettingsButton = $("saveSettingsButton");
+  if (saveSettingsButton) saveSettingsButton.addEventListener("click", saveSettings);
 }
 
 bindControls();
 renderGestureMap();
+loadSettings();
 refreshStatus();
 refreshCommands().catch(() => undefined);
 setInterval(refreshStatus, 500);
 setInterval(() => {
-  if (demoMode) applyDemoStatus();
-}, 1300);
-setInterval(() => {
-  if (!demoMode && !browserCameraMode) refreshCommands().catch(() => undefined);
+  if (!browserCameraMode) refreshCommands().catch(() => undefined);
 }, 1000);

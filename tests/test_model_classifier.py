@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.domain import GestureID
+from src.domain import GestureID, GesturePrediction
 from src.recognition.landmark_features import (
     DYNAMIC_FEATURE_VERSION,
     STATIC_FEATURE_VERSION,
@@ -8,6 +8,7 @@ from src.recognition.landmark_features import (
     extract_trajectory_features,
 )
 from src.recognition.model_classifier import (
+    FallbackDynamicGestureClassifier,
     FallbackStaticGestureClassifier,
     ModelBundle,
     SklearnDynamicGestureClassifier,
@@ -121,6 +122,68 @@ def test_dynamic_model_classifier_waits_for_full_window_by_default() -> None:
     assert prediction.gesture_id == GestureID.UNKNOWN
 
 
+def test_fallback_dynamic_classifier_waits_when_model_window_is_short() -> None:
+    classifier = FallbackDynamicGestureClassifier(
+        primary=_FakeDynamicClassifier(GestureID.UNKNOWN, 0.0, "trajectory_too_short"),
+        fallback=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+    )
+    buffer = TrajectoryBuffer(max_size=30)
+    for index, x in enumerate((0.2, 0.6, 0.3)):
+        buffer.add_point(
+            TrajectoryPoint(
+                palm_center=(x, 0.4, 0.0),
+                index_tip=(x, 0.2, 0.0),
+                hand_size=0.2,
+                timestamp=float(index),
+            )
+        )
+
+    prediction = classifier.classify(buffer)
+
+    assert prediction.gesture_id == GestureID.UNKNOWN
+    assert prediction.metadata["reason"] == "trajectory_too_short"
+
+
+def test_fallback_dynamic_classifier_uses_rules_after_model_unknown() -> None:
+    classifier = FallbackDynamicGestureClassifier(
+        primary=_FakeDynamicClassifier(GestureID.UNKNOWN, 0.0, "model_confidence_below_threshold"),
+        fallback=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+    )
+    buffer = TrajectoryBuffer(max_size=30)
+
+    prediction = classifier.classify(buffer)
+
+    assert prediction.gesture_id == GestureID.WAVE_LR
+    assert prediction.metadata["fallback_after"] == "model_confidence_below_threshold"
+
+
+def test_fallback_dynamic_classifier_prefers_rule_wave_over_model_circle() -> None:
+    classifier = FallbackDynamicGestureClassifier(
+        primary=_FakeDynamicClassifier(GestureID.CIRCLE, 0.92),
+        fallback=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+    )
+    buffer = TrajectoryBuffer(max_size=30)
+
+    prediction = classifier.classify(buffer)
+
+    assert prediction.gesture_id == GestureID.WAVE_LR
+    assert prediction.metadata["overrode_model"] == "CIRCLE"
+    assert prediction.metadata["model_confidence"] == 0.92
+
+
+def test_fallback_dynamic_classifier_prefers_rule_pull_over_model_circle() -> None:
+    classifier = FallbackDynamicGestureClassifier(
+        primary=_FakeDynamicClassifier(GestureID.CIRCLE, 0.92),
+        fallback=_FakeDynamicClassifier(GestureID.PULL_TOWARD, 0.86),
+    )
+    buffer = TrajectoryBuffer(max_size=30)
+
+    prediction = classifier.classify(buffer)
+
+    assert prediction.gesture_id == GestureID.PULL_TOWARD
+    assert prediction.metadata["overrode_model"] == "CIRCLE"
+
+
 def test_feature_extractors_return_stable_lengths() -> None:
     static_features = extract_static_features(_open_palm_landmarks())
     dynamic_features = extract_trajectory_features(
@@ -152,6 +215,20 @@ class _FakeModel:
     def predict_proba(self, features: list[tuple[float, ...]]) -> list[tuple[float, ...]]:
         assert features
         return [self._probabilities]
+
+
+class _FakeDynamicClassifier:
+    def __init__(
+        self,
+        gesture_id: GestureID,
+        confidence: float,
+        unknown_reason: str | None = None,
+    ) -> None:
+        metadata = {"reason": unknown_reason} if unknown_reason is not None else {}
+        self._prediction = GesturePrediction(gesture_id, confidence, metadata)
+
+    def classify(self, buffer: TrajectoryBuffer) -> GesturePrediction:
+        return self._prediction
 
 
 def _open_palm_landmarks() -> list[list[float]]:

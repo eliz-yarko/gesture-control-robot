@@ -78,11 +78,21 @@ class CommandMapper:
 
         return self._confirmation_state
 
+    def configure(self, config: CommandMappingConfig) -> None:
+        """Update confirmation thresholds used for future predictions."""
+
+        if config == self._config:
+            return
+        self._config = config
+        self._state = _DebounceState()
+        self._confirmation_state = CommandConfirmationState.unknown("settings_updated")
+
     def update(self, prediction: GesturePrediction) -> CommandEvent | None:
         """Update mapper state and return a command once it is confirmed."""
 
         if prediction.gesture_id == GestureID.UNKNOWN:
             self._state = _DebounceState()
+            self._last_emitted = None
             self._confirmation_state = CommandConfirmationState.unknown(
                 prediction.metadata.get("reason", "unknown_prediction")
             )

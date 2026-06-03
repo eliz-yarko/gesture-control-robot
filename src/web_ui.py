@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -41,6 +42,8 @@ from src.transmission.mock_sender import MockCommandSender
 from src.transmission.serial_sender import SerialCommandSender
 
 LOGGER = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DYNAMIC_MODEL_PATH = PROJECT_ROOT / "models" / "dynamic_gesture_classifier.joblib"
 
 HAND_CONNECTIONS = (
     (0, 1),
@@ -93,6 +96,7 @@ class DashboardSnapshot:
     static_confidence: float
     dynamic_gesture: str
     dynamic_confidence: float
+    dynamic_state: str
     selected_gesture: str
     selected_confidence: float
     last_command: str
@@ -137,6 +141,7 @@ class DashboardState:
             static_confidence=0.0,
             dynamic_gesture=GestureID.UNKNOWN.name,
             dynamic_confidence=0.0,
+            dynamic_state="idle",
             selected_gesture=GestureID.UNKNOWN.name,
             selected_confidence=0.0,
             last_command=RobotCommand.UNKNOWN.value,
@@ -167,6 +172,7 @@ class DashboardState:
                 static_confidence=current.static_confidence,
                 dynamic_gesture=current.dynamic_gesture,
                 dynamic_confidence=current.dynamic_confidence,
+                dynamic_state=current.dynamic_state,
                 selected_gesture=current.selected_gesture,
                 selected_confidence=current.selected_confidence,
                 last_command=current.last_command,
@@ -217,6 +223,7 @@ class DashboardState:
                 static_confidence=result.static_prediction.confidence,
                 dynamic_gesture=result.dynamic_prediction.gesture_id.name,
                 dynamic_confidence=result.dynamic_prediction.confidence,
+                dynamic_state=result.dynamic_state,
                 selected_gesture=result.selected_prediction.gesture_id.name,
                 selected_confidence=result.selected_prediction.confidence,
                 last_command=last_command,
@@ -254,6 +261,7 @@ class DashboardState:
             "static_confidence": _rounded(snapshot.static_confidence),
             "dynamic_gesture": snapshot.dynamic_gesture,
             "dynamic_confidence": _rounded(snapshot.dynamic_confidence),
+            "dynamic_state": snapshot.dynamic_state,
             "selected_gesture": snapshot.selected_gesture,
             "selected_confidence": _rounded(snapshot.selected_confidence),
             "last_command": snapshot.last_command,
@@ -269,6 +277,9 @@ class DashboardState:
             "command_ready": snapshot.command_state.ready,
             "command_blocked_reason": snapshot.command_state.blocked_reason,
             "command_min_confidence": _rounded(self._command_config.min_confidence),
+            "static_confirmation_frames": self._command_config.static_confirmation_frames,
+            "dynamic_confirmation_frames": self._command_config.dynamic_confirmation_frames,
+            "emergency_confirmation_frames": self._command_config.emergency_confirmation_frames,
             "landmarks": _landmarks_payload(snapshot.pose_analysis),
             "finger_states": _finger_states_payload(snapshot.pose_analysis),
             "pose_directions": _pose_directions_payload(snapshot.pose_analysis),
@@ -293,6 +304,26 @@ class DashboardState:
             }
             for entry in entries
         ]
+
+    def command_config(self) -> CommandMappingConfig:
+        """Return the active command confirmation settings."""
+
+        with self._lock:
+            return self._command_config
+
+    def settings_payload(self) -> dict[str, object]:
+        """Return runtime settings for the browser controls."""
+
+        with self._lock:
+            config = self._command_config
+        return _settings_payload(config)
+
+    def update_command_config(self, config: CommandMappingConfig) -> dict[str, object]:
+        """Store updated command confirmation settings."""
+
+        with self._lock:
+            self._command_config = config
+        return _settings_payload(config)
 
     def _uptime_seconds(self) -> float:
         return perf_counter() - self._started_at
@@ -340,6 +371,7 @@ class BrowserFrameProcessor:
             bgr_frame = self._decode_frame(image_value)
             frame = self._captured_frame_from_bgr(bgr_frame)
             started_at = perf_counter()
+            self._pipeline.configure_command_mapping(self._state.command_config())
             result = self._pipeline.process(frame)
             latency_ms = (perf_counter() - started_at) * 1000
             now = perf_counter()
@@ -482,6 +514,7 @@ class CaptureWorker:
                         break
 
                     started_at = perf_counter()
+                    pipeline.configure_command_mapping(self._state.command_config())
                     result = pipeline.process(frame)
                     latency_ms = (perf_counter() - started_at) * 1000
                     now = perf_counter()
@@ -565,6 +598,8 @@ class GestureDashboardHandler(BaseHTTPRequestHandler):
             self._send_text(APP_JS, "application/javascript; charset=utf-8")
         elif path == "/api/status":
             self._send_json(self._dashboard_server().state.status_payload())
+        elif path == "/api/settings":
+            self._send_json(self._dashboard_server().state.settings_payload())
         elif path == "/api/commands":
             self._send_json(self._dashboard_server().state.command_payload())
         elif path == "/stream.mjpg":
@@ -576,6 +611,18 @@ class GestureDashboardHandler(BaseHTTPRequestHandler):
         """Handle dashboard POST routes."""
 
         path = urlparse(self.path).path
+        if path == "/api/settings":
+            try:
+                state = self._dashboard_server().state
+                payload = self._read_json_body(max_bytes=10_000)
+                config = _command_config_from_payload(state.command_config(), payload)
+                response = state.update_command_config(config)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(response)
+            return
+
         if path != "/api/frame":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -703,7 +750,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--dynamic-model",
         type=str,
         default=None,
-        help="Optional joblib model for dynamic gesture classification.",
+        help=(
+            "Optional joblib model for dynamic gesture classification. "
+            "Defaults to models/dynamic_gesture_classifier.joblib when present."
+        ),
+    )
+    parser.add_argument(
+        "--no-dynamic-model",
+        action="store_true",
+        help="Use only the heuristic dynamic classifier, even if a bundled model exists.",
     )
     parser.add_argument(
         "--sender",
@@ -751,6 +806,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         transport=args.sender,
         command_config=config.command_mapping,
     )
+    dynamic_model = "" if args.no_dynamic_model else args.dynamic_model
     stop_event = threading.Event()
     worker: CaptureWorker | None = None
     frame_processor: BrowserFrameProcessor | None = None
@@ -762,7 +818,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sender=sender,
             jpeg_quality=args.jpeg_quality,
             static_model=args.static_model,
-            dynamic_model=args.dynamic_model,
+            dynamic_model=dynamic_model,
         )
     else:
         worker = CaptureWorker(
@@ -774,7 +830,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             loop_video=args.loop_video,
             jpeg_quality=args.jpeg_quality,
             static_model=args.static_model,
-            dynamic_model=args.dynamic_model,
+            dynamic_model=dynamic_model,
         )
     server = GestureDashboardServer(
         (args.host, args.port),
@@ -829,21 +885,40 @@ def _build_pipeline(
             ),
             fallback=StaticGestureClassifier(config.static_classifier),
         )
-    if dynamic_model is not None:
-        dynamic_classifier = FallbackDynamicGestureClassifier(
-            primary=SklearnDynamicGestureClassifier.load_path(
-                dynamic_model,
-                min_confidence=config.command_mapping.min_confidence,
-                min_points=config.dynamic_classifier.buffer_size,
-            ),
-            fallback=DynamicGestureClassifier(config.dynamic_classifier),
-        )
+    dynamic_model_path = _resolve_dynamic_model_path(dynamic_model)
+    if dynamic_model_path is not None:
+        try:
+            dynamic_classifier = FallbackDynamicGestureClassifier(
+                primary=SklearnDynamicGestureClassifier.load_path(
+                    dynamic_model_path,
+                    min_confidence=config.command_mapping.min_confidence,
+                    min_points=max(
+                        config.dynamic_classifier.min_window_points,
+                        config.dynamic_classifier.buffer_size // 3,
+                    ),
+                ),
+                fallback=DynamicGestureClassifier(config.dynamic_classifier),
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            LOGGER.warning(
+                "Cannot load dynamic model %s; using heuristics: %s",
+                dynamic_model_path,
+                exc,
+            )
     return GestureControlPipeline(
         config=config,
         static_classifier=static_classifier,
         dynamic_classifier=dynamic_classifier,
         command_sender=sender,
     )
+
+
+def _resolve_dynamic_model_path(model_path: str | None) -> Path | None:
+    if model_path == "":
+        return None
+    if model_path is not None:
+        return Path(model_path)
+    return DEFAULT_DYNAMIC_MODEL_PATH if DEFAULT_DYNAMIC_MODEL_PATH.exists() else None
 
 
 def _annotate_frame(
@@ -994,6 +1069,53 @@ def _expected_pose_payload(gesture_name: str) -> dict[str, object]:
     }
 
 
+def _settings_payload(config: CommandMappingConfig) -> dict[str, object]:
+    return {
+        "static_confirmation_frames": config.static_confirmation_frames,
+        "dynamic_confirmation_frames": config.dynamic_confirmation_frames,
+        "emergency_confirmation_frames": config.emergency_confirmation_frames,
+        "min_confidence": _rounded(config.min_confidence),
+        "repeat_same_command": config.repeat_same_command,
+    }
+
+
+def _command_config_from_payload(
+    current: CommandMappingConfig,
+    payload: dict[str, object],
+) -> CommandMappingConfig:
+    static_frames = _confirmation_frames(
+        payload.get("static_confirmation_frames"),
+        current.static_confirmation_frames,
+    )
+    dynamic_frames = _confirmation_frames(
+        payload.get("dynamic_confirmation_frames"),
+        current.dynamic_confirmation_frames,
+    )
+    emergency_frames = _confirmation_frames(
+        payload.get("emergency_confirmation_frames"),
+        current.emergency_confirmation_frames,
+    )
+    return CommandMappingConfig(
+        static_confirmation_frames=static_frames,
+        dynamic_confirmation_frames=dynamic_frames,
+        emergency_confirmation_frames=emergency_frames,
+        min_confidence=current.min_confidence,
+        repeat_same_command=current.repeat_same_command,
+    )
+
+
+def _confirmation_frames(value: object, fallback: int) -> int:
+    if value is None:
+        return fallback
+    try:
+        frames = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Confirmation frames must be whole numbers.") from exc
+    if frames < 1 or frames > 12:
+        raise ValueError("Confirmation frames must be in the range 1..12.")
+    return frames
+
+
 def _timestamp() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
@@ -1013,35 +1135,9 @@ INDEX_HTML = """<!doctype html>
         <h1>Gesture Control Console</h1>
         <p id="sourceLine">camera:0</p>
       </div>
-      <div class="topbar-actions">
-        <input
-          id="apiBaseInput"
-          class="api-input"
-          type="url"
-          inputmode="url"
-          placeholder="Backend URL"
-          aria-label="Backend URL"
-        >
-        <div class="state-strip">
-          <span id="stateBadge" class="badge badge-muted">starting</span>
-          <span id="transportBadge" class="badge">mock</span>
-        </div>
-        <div class="button-row">
-          <button
-            id="browserCameraToggle"
-            class="icon-button"
-            type="button"
-            title="Use this browser camera"
-          >
-            Camera
-          </button>
-          <button id="demoToggle" class="icon-button" type="button" title="Toggle demo data">
-            Demo
-          </button>
-          <button id="reloadButton" class="icon-button" type="button" title="Reload stream">
-            Reload
-          </button>
-        </div>
+      <div class="state-strip">
+        <span id="stateBadge" class="badge badge-muted">starting</span>
+        <span id="transportBadge" class="badge">mock</span>
       </div>
     </header>
 
@@ -1051,25 +1147,52 @@ INDEX_HTML = """<!doctype html>
           <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
           <video id="browserVideo" class="browser-video" autoplay playsinline muted hidden></video>
           <canvas id="captureCanvas" hidden></canvas>
-          <div id="demoFrame" class="demo-frame" hidden>
-            <div class="demo-hand" aria-hidden="true">
-              <span class="finger finger-thumb"></span>
-              <span class="finger finger-index"></span>
-              <span class="finger finger-middle"></span>
-              <span class="finger finger-ring"></span>
-              <span class="finger finger-pinky"></span>
-              <span class="palm"></span>
-            </div>
-          </div>
+          <button id="startVideoButton" class="video-start-button" type="button">
+            Start video
+          </button>
         </div>
+        <p class="video-access-note">
+          Camera/video access is required to recognize gestures and control the robot.
+        </p>
         <div class="frame-strip">
           <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
           <div><span>Last command</span><strong id="lastCommand">UNKNOWN</strong></div>
           <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
+          <div><span>Dynamic state</span><strong id="dynamicState">idle</strong></div>
         </div>
       </section>
 
       <aside class="status-rail">
+        <section class="panel control-panel">
+          <span class="eyebrow">control</span>
+          <div class="control-buttons">
+            <button id="sideStartButton" class="primary-button" type="button">Start</button>
+            <button id="stopVideoButton" class="secondary-button" type="button">Stop</button>
+            <button id="reloadButton" class="secondary-button" type="button">Reload</button>
+          </div>
+          <label class="field-label">
+            <span>Backend URL</span>
+            <input
+              id="apiBaseInput"
+              class="api-input"
+              type="url"
+              inputmode="url"
+              placeholder="same-origin"
+              aria-label="Backend URL"
+            >
+          </label>
+        </section>
+
+        <section class="panel robot-panel">
+          <span class="eyebrow">robot transmission</span>
+          <strong id="robotTransferState">WAITING</strong>
+          <div class="robot-grid">
+            <div><span>Transport</span><b id="transportText">mock</b></div>
+            <div><span>Sent</span><b id="robotCommandCount">0</b></div>
+            <div><span>Last gesture</span><b id="robotLastGesture">UNKNOWN</b></div>
+          </div>
+        </section>
+
         <section class="panel command-panel">
           <span class="eyebrow">last confirmed command</span>
           <strong id="commandDisplay">UNKNOWN</strong>
@@ -1084,6 +1207,30 @@ INDEX_HTML = """<!doctype html>
             <span id="confirmationProgressBar"></span>
           </div>
           <span id="confirmationProgressText">0 / 0 frames</span>
+        </section>
+
+        <section class="panel settings-panel">
+          <div class="section-header compact-header">
+            <h2>Confirmation frames</h2>
+            <span id="settingsStatus">saved</span>
+          </div>
+          <div class="settings-grid">
+            <label>
+              <span>Static</span>
+              <input id="staticFramesInput" type="number" min="1" max="12" step="1" value="5">
+            </label>
+            <label>
+              <span>Dynamic</span>
+              <input id="dynamicFramesInput" type="number" min="1" max="12" step="1" value="1">
+            </label>
+            <label>
+              <span>Emergency</span>
+              <input id="emergencyFramesInput" type="number" min="1" max="12" step="1" value="3">
+            </label>
+          </div>
+          <button id="saveSettingsButton" class="primary-button full-button" type="button">
+            Apply
+          </button>
         </section>
 
         <section class="metrics-grid">
@@ -1193,7 +1340,7 @@ body {
 }
 
 .app-shell {
-  width: min(1480px, 100%);
+  width: min(1320px, 100%);
   margin: 0 auto;
   padding: 18px 20px 24px;
 }
@@ -1220,14 +1367,6 @@ h1 {
   margin-top: 4px;
   color: var(--muted);
   font-size: 14px;
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .state-strip {
@@ -1279,6 +1418,38 @@ h1 {
   color: var(--blue);
 }
 
+.primary-button,
+.secondary-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.primary-button {
+  border-color: rgba(15, 127, 104, 0.38);
+  background: var(--teal);
+  color: #ffffff;
+}
+
+.primary-button:hover {
+  background: #0c6f5c;
+}
+
+.secondary-button {
+  background: var(--panel);
+  color: var(--graphite);
+}
+
+.secondary-button:hover {
+  border-color: rgba(30, 110, 168, 0.45);
+  color: var(--blue);
+}
+
 .badge {
   min-width: 88px;
   min-height: 32px;
@@ -1305,20 +1476,16 @@ h1 {
   color: var(--red);
 }
 
-.badge-demo {
-  border-color: rgba(115, 82, 161, 0.35);
-  color: var(--violet);
-}
-
 .badge-muted {
   color: var(--muted);
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(520px, 860px) minmax(340px, 390px);
   gap: 18px;
-  align-items: stretch;
+  justify-content: center;
+  align-items: start;
 }
 
 .video-panel,
@@ -1332,7 +1499,8 @@ h1 {
 
 .video-stage {
   position: relative;
-  min-height: 430px;
+  aspect-ratio: 4 / 3;
+  min-height: 0;
   background: #11161b;
   border-radius: 8px;
   overflow: hidden;
@@ -1343,19 +1511,9 @@ h1 {
 .video-stage img {
   width: 100%;
   height: 100%;
-  min-height: 430px;
-  aspect-ratio: 4 / 3;
   object-fit: contain;
   display: block;
   background: #11161b;
-}
-
-.video-stage.demo-active img {
-  display: none;
-}
-
-.video-stage.browser-active .demo-frame {
-  display: none;
 }
 
 .video-stage.browser-active .browser-video {
@@ -1369,94 +1527,50 @@ h1 {
 .browser-video {
   width: 100%;
   height: 100%;
-  min-height: 430px;
   object-fit: contain;
   background: #11161b;
   transform: scaleX(-1);
 }
 
-.demo-frame {
-  width: 100%;
-  height: 100%;
-  min-height: 430px;
-  display: grid;
-  place-items: center;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    #11161b;
-  background-size: 36px 36px;
-}
-
-.demo-hand {
-  position: relative;
-  width: 172px;
-  height: 220px;
-  transform: rotate(-8deg);
-  animation: hand-scan 2.6s ease-in-out infinite;
-}
-
-.palm {
+.video-start-button {
   position: absolute;
-  left: 46px;
-  bottom: 24px;
-  width: 86px;
-  height: 106px;
-  border-radius: 32px 32px 28px 28px;
-  background: #d9a071;
-  border: 2px solid rgba(255, 255, 255, 0.18);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 154px;
+  min-height: 48px;
+  padding: 12px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(15, 127, 104, 0.94);
+  color: #ffffff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 820;
+  cursor: pointer;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
 }
 
-.finger {
-  position: absolute;
-  bottom: 122px;
-  width: 22px;
-  border-radius: 14px;
-  background: #d9a071;
-  border: 2px solid rgba(255, 255, 255, 0.18);
-  transform-origin: bottom center;
+.video-start-button:hover {
+  background: rgba(12, 111, 92, 0.98);
 }
 
-.finger-thumb {
-  left: 25px;
-  bottom: 88px;
-  height: 74px;
-  transform: rotate(-47deg);
+.video-stage.video-started .video-start-button {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.finger-index {
-  left: 54px;
-  height: 124px;
-}
-
-.finger-middle {
-  left: 82px;
-  height: 144px;
-}
-
-.finger-ring {
-  left: 110px;
-  height: 126px;
-}
-
-.finger-pinky {
-  left: 138px;
-  height: 94px;
-  transform: rotate(10deg);
-}
-
-@keyframes hand-scan {
-  0%, 100% {
-    transform: translateX(-34px) rotate(-8deg);
-  }
-  50% {
-    transform: translateX(34px) rotate(8deg);
-  }
+.video-access-note {
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .frame-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid var(--line);
 }
 
@@ -1497,6 +1611,77 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
+}
+
+.control-panel,
+.robot-panel,
+.settings-panel {
+  padding: 14px;
+}
+
+.control-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.field-label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.field-label .api-input {
+  width: 100%;
+  text-transform: none;
+  font-weight: 500;
+}
+
+.robot-panel {
+  border-top: 4px solid var(--blue);
+}
+
+.robot-panel > strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.robot-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.robot-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.robot-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.robot-grid b {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .command-panel {
@@ -1563,6 +1748,42 @@ h1 {
 
 .confirmation-panel.blocked .progress-track span {
   background: var(--amber);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.settings-grid input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 760;
+}
+
+.full-button {
+  width: 100%;
+  margin-top: 12px;
 }
 
 .eyebrow {
@@ -1704,7 +1925,7 @@ h1 {
 
 .lower-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 430px;
+  grid-template-columns: 1fr;
   gap: 18px;
   margin-top: 18px;
   align-items: start;
@@ -1760,7 +1981,7 @@ th {
 
 .gesture-map {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
 }
 
@@ -1821,11 +2042,6 @@ th {
     flex-direction: column;
   }
 
-  .topbar-actions {
-    justify-content: flex-start;
-    width: 100%;
-  }
-
   .api-input {
     width: 100%;
   }
@@ -1839,10 +2055,8 @@ th {
   }
 
   .video-stage,
-  .video-stage img,
-  .browser-video,
-  .demo-frame {
-    min-height: 260px;
+  .browser-video {
+    aspect-ratio: 4 / 3;
   }
 
   .frame-strip {
@@ -1867,16 +2081,6 @@ const $ = (id) => document.getElementById(id);
 const queryParams = new URLSearchParams(window.location.search);
 let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
 const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;
-const DEMO_SEQUENCE = [
-  ["OPEN_PALM", "STOP", 0.96, "OPEN_PALM", "UNKNOWN"],
-  ["FIST", "FORWARD", 0.91, "FIST", "UNKNOWN"],
-  ["INDEX_LEFT", "TURN_LEFT", 0.88, "INDEX_LEFT", "UNKNOWN"],
-  ["INDEX_RIGHT", "TURN_RIGHT", 0.90, "INDEX_RIGHT", "UNKNOWN"],
-  ["THUMB_UP", "START", 0.94, "THUMB_UP", "UNKNOWN"],
-  ["WAVE_LR", "MODE_TOGGLE", 0.86, "OPEN_PALM", "WAVE_LR"],
-  ["CIRCLE", "ROTATE_360", 0.84, "UNKNOWN", "CIRCLE"],
-  ["PULL_TOWARD", "APPROACH_OPERATOR", 0.82, "UNKNOWN", "PULL_TOWARD"],
-];
 const GESTURE_COMMANDS = [
   ["OPEN_PALM", "STOP"],
   ["FIST", "FORWARD"],
@@ -1900,14 +2104,13 @@ const FINGER_LABELS = [
   ["pinky", "Pinky"],
 ];
 
-let demoMode = false;
 let browserCameraMode = false;
-let demoIndex = 0;
 let commandCache = [];
-let lastBackendOk = true;
 let browserStream = null;
 let frameTimer = null;
 let frameInFlight = false;
+let currentSource = "";
+let settingsDirty = false;
 
 function text(id, value) {
   const node = $(id);
@@ -1926,9 +2129,19 @@ function setStateBadge(state) {
   badge.textContent = state;
   badge.className = "badge";
   if (state === "running") badge.classList.add("badge-running");
-  else if (state === "demo") badge.classList.add("badge-demo");
   else if (state === "error") badge.classList.add("badge-error");
   else badge.classList.add("badge-muted");
+}
+
+function setVideoStarted(started) {
+  const stage = document.querySelector(".video-stage");
+  if (stage) stage.classList.toggle("video-started", Boolean(started));
+  const startButton = $("startVideoButton");
+  if (startButton) startButton.textContent = started ? "Video running" : "Start video";
+  const sideStartButton = $("sideStartButton");
+  if (sideStartButton) sideStartButton.textContent = started ? "Running" : "Start";
+  const stopButton = $("stopVideoButton");
+  if (stopButton) stopButton.disabled = !browserCameraMode;
 }
 
 function buildUrl(path) {
@@ -2051,8 +2264,10 @@ function renderLandmarks(landmarks) {
 }
 
 function applyStatus(status) {
+  currentSource = status.source || "";
   setStateBadge(status.state);
   text("transportBadge", status.transport);
+  text("transportText", status.transport);
   text("sourceLine", status.source);
   text("lastCommand", status.last_command);
   text("commandDisplay", status.last_command);
@@ -2062,6 +2277,13 @@ function applyStatus(status) {
   );
   text("selectedGesture", status.selected_gesture);
   text("selectedConfidence", fmt(status.selected_confidence));
+  text("dynamicState", status.dynamic_state || "idle");
+  text("robotCommandCount", status.command_count);
+  text("robotLastGesture", status.last_command_gesture);
+  text(
+    "robotTransferState",
+    status.last_command && status.last_command !== "UNKNOWN" ? "SENT" : "WAITING"
+  );
   text("fps", fmt(status.fps, "", 1));
   text("latency", fmt(status.latency_ms, " ms", 1));
   text("handCount", status.hand_count);
@@ -2080,6 +2302,8 @@ function applyStatus(status) {
   renderPoseDiagnostics(status);
   renderLandmarks(status.landmarks);
   renderGestureMap(status.selected_gesture);
+  if (!settingsDirty) applySettings(settingsPayloadFromStatus(status));
+  if (!browserCameraMode) setVideoStarted(status.state === "running");
 
   const errorPanel = $("errorPanel");
   if (status.error) {
@@ -2091,107 +2315,87 @@ function applyStatus(status) {
   }
 }
 
-function demoStatus() {
-  const [gesture, command, confidence, staticGesture, dynamicGesture] =
-    DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
-  const requiredFrames = dynamicGesture === "UNKNOWN" ? 5 : 1;
-  return {
-    state: "demo",
-    source: "static-demo",
-    transport: "mock",
-    frame_index: 1200 + demoIndex * 18,
-    fps: 24.0 + (demoIndex % 3) * 0.7,
-    latency_ms: 36.0 + (demoIndex % 4) * 4.5,
-    hand_count: 1,
-    static_gesture: staticGesture,
-    static_confidence: staticGesture === "UNKNOWN" ? 0 : Math.max(0.78, confidence - 0.04),
-    dynamic_gesture: dynamicGesture,
-    dynamic_confidence: dynamicGesture === "UNKNOWN" ? 0 : confidence,
-    selected_gesture: gesture,
-    selected_confidence: confidence,
-    last_command: command,
-    last_command_gesture: gesture,
-    last_command_confidence: confidence,
-    command_count: commandCache.length,
-    command_candidate_gesture: gesture,
-    command_candidate_command: command,
-    command_candidate_confidence: confidence,
-    command_stable_frames: requiredFrames,
-    command_required_frames: requiredFrames,
-    command_progress: 1,
-    command_ready: true,
-    command_blocked_reason: "",
-    command_min_confidence: 0.65,
-    landmarks: [],
-    finger_states: {},
-    pose_directions: {},
-    expected_pose: {},
-    error: "",
-    updated_at: nowTime(),
-  };
-}
-
-function setDemoMode(enabled) {
-  if (enabled && browserCameraMode) stopBrowserCamera();
-  demoMode = enabled;
-  const button = $("demoToggle");
-  if (button) button.classList.toggle("active", demoMode);
-  const stage = document.querySelector(".video-stage");
-  if (stage) stage.classList.toggle("demo-active", demoMode);
-  const demoFrame = $("demoFrame");
-  if (demoFrame) demoFrame.hidden = !demoMode;
-  if (demoMode) {
-    applyDemoStatus();
-    renderCommands(commandCache);
-  } else {
-    reloadStream();
-  }
-}
-
-function applyDemoStatus() {
-  const status = demoStatus();
-  applyStatus(status);
-  if (!commandCache.length || commandCache[0].gesture !== status.selected_gesture) {
-    commandCache.unshift({
-      created_at: status.updated_at,
-      command: status.last_command,
-      gesture: status.selected_gesture,
-      confidence: Number(status.selected_confidence.toFixed(2)),
-      frame_index: status.frame_index,
-    });
-    commandCache = commandCache.slice(0, 10);
-  }
-  renderCommands(commandCache);
-  demoIndex += 1;
-}
-
 function reloadStream() {
   const stream = $("stream");
   if (stream) stream.src = `${buildUrl("stream.mjpg")}?t=${Date.now()}`;
 }
 
 async function refreshStatus() {
-  if (demoMode || browserCameraMode) return;
+  if (browserCameraMode) return;
   try {
     const response = await fetch(buildUrl("api/status"), { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const status = await response.json();
-    lastBackendOk = true;
     applyStatus(status);
   } catch (error) {
-    if (lastBackendOk) setDemoMode(true);
-    lastBackendOk = false;
-    const status = demoStatus();
-    status.error = "Backend offline; demo data is active.";
-    applyStatus(status);
+    showRuntimeError(
+      cameraAccessMessage("Backend is unavailable. Start the video backend.")
+    );
+  }
+}
+
+function settingsPayloadFromStatus(status) {
+  return {
+    static_confirmation_frames: status.static_confirmation_frames,
+    dynamic_confirmation_frames: status.dynamic_confirmation_frames,
+    emergency_confirmation_frames: status.emergency_confirmation_frames,
+  };
+}
+
+function applySettings(settings) {
+  const pairs = [
+    ["staticFramesInput", settings.static_confirmation_frames],
+    ["dynamicFramesInput", settings.dynamic_confirmation_frames],
+    ["emergencyFramesInput", settings.emergency_confirmation_frames],
+  ];
+  for (const [id, value] of pairs) {
+    const input = $(id);
+    if (input && document.activeElement !== input && value !== undefined) {
+      input.value = value;
+    }
+  }
+  if (!settingsDirty) text("settingsStatus", "saved");
+}
+
+function readSettings() {
+  return {
+    static_confirmation_frames: Number($("staticFramesInput")?.value || 1),
+    dynamic_confirmation_frames: Number($("dynamicFramesInput")?.value || 1),
+    emergency_confirmation_frames: Number($("emergencyFramesInput")?.value || 1),
+  };
+}
+
+async function loadSettings() {
+  try {
+    const response = await fetch(buildUrl("api/settings"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    applySettings(await response.json());
+  } catch (error) {
+    text("settingsStatus", "offline");
+  }
+}
+
+async function saveSettings() {
+  syncApiBaseFromInput();
+  text("settingsStatus", "saving");
+  try {
+    const response = await fetch(buildUrl("api/settings"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(readSettings()),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    settingsDirty = false;
+    applySettings(payload);
+    text("settingsStatus", "saved");
+  } catch (error) {
+    text("settingsStatus", "error");
+    showRuntimeError(error.message);
   }
 }
 
 async function refreshCommands() {
-  if (demoMode) {
-    renderCommands(commandCache);
-    return;
-  }
   const response = await fetch(buildUrl("api/commands"), { cache: "no-store" });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   commandCache = await response.json();
@@ -2199,10 +2403,9 @@ async function refreshCommands() {
 }
 
 async function startBrowserCamera() {
-  setDemoMode(false);
   syncApiBaseFromInput();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showRuntimeError("Browser camera API is unavailable on this page.");
+    showRuntimeError(cameraAccessMessage("Browser camera API is unavailable on this page."));
     return;
   }
   try {
@@ -2219,18 +2422,15 @@ async function startBrowserCamera() {
     video.srcObject = browserStream;
     await video.play();
     browserCameraMode = true;
-    const button = $("browserCameraToggle");
-    if (button) button.classList.add("active");
     const stage = document.querySelector(".video-stage");
     if (stage) stage.classList.add("browser-active");
     video.hidden = false;
-    const demoFrame = $("demoFrame");
-    if (demoFrame) demoFrame.hidden = true;
+    setVideoStarted(true);
     setStateBadge("camera");
     text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
     frameTimer = window.setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS);
   } catch (error) {
-    showRuntimeError(error.message);
+    showRuntimeError(cameraAccessMessage(error));
   }
 }
 
@@ -2250,11 +2450,30 @@ function stopBrowserCamera() {
     video.srcObject = null;
     video.hidden = true;
   }
-  const button = $("browserCameraToggle");
-  if (button) button.classList.remove("active");
   const stage = document.querySelector(".video-stage");
   if (stage) stage.classList.remove("browser-active");
+  setVideoStarted(false);
   reloadStream();
+}
+
+async function startVideo() {
+  syncApiBaseFromInput();
+  if (!currentSource || currentSource === "browser-camera" || browserCameraMode) {
+    await startBrowserCamera();
+    return;
+  }
+  setVideoStarted(true);
+  reloadStream();
+  refreshStatus();
+  refreshCommands().catch(() => undefined);
+}
+
+function stopVideo() {
+  if (browserCameraMode) {
+    stopBrowserCamera();
+    return;
+  }
+  setVideoStarted(false);
 }
 
 async function captureAndSendFrame() {
@@ -2331,6 +2550,19 @@ function showRuntimeError(message) {
   text("errorText", message);
 }
 
+function cameraAccessMessage(error) {
+  const detail = typeof error === "string" ? error : error?.message || "";
+  if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
+    return [
+      "Camera/video access is required to control the robot.",
+      "Grant video permission and try again.",
+    ].join(" ");
+  }
+  return detail
+    ? `Camera/video access is required to control the robot. ${detail}`
+    : "Camera/video access is required to control the robot.";
+}
+
 function bindControls() {
   const apiInput = $("apiBaseInput");
   if (apiInput) {
@@ -2338,29 +2570,35 @@ function bindControls() {
     apiBase = apiInput.value.trim();
     apiInput.addEventListener("change", syncApiBaseFromInput);
   }
-  const cameraButton = $("browserCameraToggle");
-  if (cameraButton) {
-    cameraButton.addEventListener("click", () => {
-      if (browserCameraMode) stopBrowserCamera();
-      else startBrowserCamera();
-    });
-  }
-  const demoButton = $("demoToggle");
-  if (demoButton) demoButton.addEventListener("click", () => setDemoMode(!demoMode));
+  const startVideoButton = $("startVideoButton");
+  if (startVideoButton) startVideoButton.addEventListener("click", startVideo);
+  const sideStartButton = $("sideStartButton");
+  if (sideStartButton) sideStartButton.addEventListener("click", startVideo);
+  const stopVideoButton = $("stopVideoButton");
+  if (stopVideoButton) stopVideoButton.addEventListener("click", stopVideo);
   const reloadButton = $("reloadButton");
   if (reloadButton) reloadButton.addEventListener("click", reloadStream);
+  for (const id of ["staticFramesInput", "dynamicFramesInput", "emergencyFramesInput"]) {
+    const input = $(id);
+    if (input) {
+      input.addEventListener("input", () => {
+        settingsDirty = true;
+        text("settingsStatus", "unsaved");
+      });
+    }
+  }
+  const saveSettingsButton = $("saveSettingsButton");
+  if (saveSettingsButton) saveSettingsButton.addEventListener("click", saveSettings);
 }
 
 bindControls();
 renderGestureMap();
+loadSettings();
 refreshStatus();
 refreshCommands().catch(() => undefined);
 setInterval(refreshStatus, 500);
 setInterval(() => {
-  if (demoMode) applyDemoStatus();
-}, 1300);
-setInterval(() => {
-  if (!demoMode && !browserCameraMode) refreshCommands().catch(() => undefined);
+  if (!browserCameraMode) refreshCommands().catch(() => undefined);
 }, 1000);
 """
 

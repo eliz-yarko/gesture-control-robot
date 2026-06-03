@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.config import CommandMappingConfig
 from src.domain import CommandEvent, GestureID, GesturePrediction, RobotCommand
 from src.interpretation.command_mapper import CommandConfirmationState
 from src.pipeline import PipelineResult
@@ -61,6 +62,7 @@ def test_dashboard_state_publishes_frame_and_command_log() -> None:
     assert status["command_candidate_gesture"] == "OPEN_PALM"
     assert status["command_candidate_command"] == "STOP"
     assert status["command_ready"] is True
+    assert status["dynamic_state"] == "idle"
     assert status["landmarks"]
     assert status["finger_states"]["index"] is True
     assert status["expected_pose"]["gesture"] == "OPEN_PALM"
@@ -72,40 +74,69 @@ def test_dashboard_state_publishes_frame_and_command_log() -> None:
     assert commands[0]["gesture"] == "OPEN_PALM"
 
 
-def test_dashboard_frontend_contains_demo_mode_assets() -> None:
-    assert "demoToggle" in INDEX_HTML
+def test_dashboard_frontend_omits_demo_mode_and_mentions_video_access() -> None:
+    assert "demoToggle" not in INDEX_HTML
+    assert "demoFrame" not in INDEX_HTML
+    assert "DEMO_SEQUENCE" not in APP_JS
+    assert "demoMode" not in APP_JS
+    assert "demo-frame" not in STYLES_CSS
+    assert "Camera/video access is required" in INDEX_HTML
+    assert "Camera/video access is required" in APP_JS
     assert "gestureMap" in INDEX_HTML
     assert "candidateCommand" in INDEX_HTML
     assert "confirmationProgressBar" in INDEX_HTML
     assert "fingerStates" in INDEX_HTML
     assert "landmarkList" in INDEX_HTML
-    assert "DEMO_SEQUENCE" in APP_JS
     assert "GESTURE_COMMANDS" in APP_JS
     assert "applyConfirmation" in APP_JS
     assert "renderPoseDiagnostics" in APP_JS
-    assert "demo-frame" in STYLES_CSS
     assert "confirmation-panel" in STYLES_CSS
     assert "landmark-list" in STYLES_CSS
 
 
 def test_dashboard_frontend_contains_browser_camera_assets() -> None:
     assert "apiBaseInput" in INDEX_HTML
-    assert "browserCameraToggle" in INDEX_HTML
+    assert "startVideoButton" in INDEX_HTML
+    assert "sideStartButton" in INDEX_HTML
+    assert "stopVideoButton" in INDEX_HTML
     assert "browserVideo" in INDEX_HTML
     assert "captureCanvas" in INDEX_HTML
     assert "getUserMedia" in APP_JS
     assert "api/frame" in APP_JS
+    assert "api/settings" in APP_JS
     assert "browserCameraMode" in APP_JS
     assert "payload.frame" in APP_JS
     assert "api-input" in STYLES_CSS
+    assert "video-start-button" in STYLES_CSS
     assert "browser-active" in STYLES_CSS
     assert "browser-video" in STYLES_CSS
+    assert "browserCameraToggle" not in INDEX_HTML
+
+
+def test_dashboard_state_updates_runtime_confirmation_settings() -> None:
+    state = DashboardState(source="browser-camera", transport="mock")
+
+    payload = state.update_command_config(
+        CommandMappingConfig(
+            static_confirmation_frames=7,
+            dynamic_confirmation_frames=3,
+            emergency_confirmation_frames=2,
+        )
+    )
+    status = state.status_payload()
+
+    assert payload["static_confirmation_frames"] == 7
+    assert payload["dynamic_confirmation_frames"] == 3
+    assert payload["emergency_confirmation_frames"] == 2
+    assert status["static_confirmation_frames"] == 7
+    assert status["dynamic_confirmation_frames"] == 3
+    assert status["emergency_confirmation_frames"] == 2
 
 
 def test_dashboard_frontend_uses_dynamic_gesture_friendly_camera_cadence() -> None:
     assert "const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;" in APP_JS
     assert "setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS)" in APP_JS
-    assert 'dynamicGesture === "UNKNOWN" ? 5 : 1' in APP_JS
+    assert "captureAndSendFrame" in APP_JS
 
 
 def test_dashboard_parser_defaults_to_low_latency_camera_resolution() -> None:
@@ -113,6 +144,8 @@ def test_dashboard_parser_defaults_to_low_latency_camera_resolution() -> None:
 
     assert args.frame_width == 480
     assert args.frame_height == 360
+    assert args.dynamic_model is None
+    assert args.no_dynamic_model is False
 
 
 def _open_palm_landmarks() -> list[tuple[float, float, float]]:

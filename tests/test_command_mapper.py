@@ -67,6 +67,19 @@ def test_command_mapper_does_not_repeat_same_command_by_default() -> None:
     assert second_event is None
 
 
+def test_command_mapper_allows_same_command_after_unknown_release() -> None:
+    mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=1))
+    prediction = GesturePrediction(GestureID.WAVE_LR, 0.9)
+
+    first_event = mapper.update(prediction)
+    assert mapper.update(GesturePrediction.unknown()) is None
+    second_event = mapper.update(prediction)
+
+    assert first_event is not None
+    assert second_event is not None
+    assert second_event.command == RobotCommand.MODE_TOGGLE
+
+
 def test_command_mapper_reports_confirmation_progress() -> None:
     mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=3))
     prediction = GesturePrediction(GestureID.OPEN_PALM, 0.9)

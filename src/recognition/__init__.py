@@ -1,6 +1,7 @@
 """Gesture recognition package."""
 
 from src.recognition.dynamic_classifier import DynamicGestureClassifier
+from src.recognition.dynamic_segmenter import DynamicGestureSegmenter
 from src.recognition.gesture_pose import (
     EXPECTED_STATIC_POSES,
     FINGER_NAMES,
@@ -21,6 +22,7 @@ from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
 
 __all__ = [
     "DynamicGestureClassifier",
+    "DynamicGestureSegmenter",
     "EXPECTED_STATIC_POSES",
     "FINGER_NAMES",
     "FallbackDynamicGestureClassifier",

@@ -6,6 +6,7 @@ import argparse
 import importlib
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 
 from src.calibration import AdaptiveCalibrator, CalibrationProfileStore
 from src.capture.video_capture import VideoCapture
@@ -22,6 +23,10 @@ from src.recognition import (
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
 from src.transmission.serial_sender import SerialCommandSender
+
+LOGGER = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DYNAMIC_MODEL_PATH = PROJECT_ROOT / "models" / "dynamic_gesture_classifier.joblib"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,7 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--dynamic-model",
         type=str,
         default=None,
-        help="Optional joblib model for dynamic gesture classification.",
+        help=(
+            "Optional joblib model for dynamic gesture classification. "
+            "Defaults to models/dynamic_gesture_classifier.joblib when present."
+        ),
+    )
+    parser.add_argument(
+        "--no-dynamic-model",
+        action="store_true",
+        help="Use only the heuristic dynamic classifier, even if a bundled model exists.",
     )
     parser.add_argument(
         "--sender",
@@ -97,15 +110,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             fallback=StaticGestureClassifier(config.static_classifier),
         )
-    if args.dynamic_model is not None:
-        dynamic_classifier = FallbackDynamicGestureClassifier(
-            primary=SklearnDynamicGestureClassifier.load_path(
-                args.dynamic_model,
-                min_confidence=config.command_mapping.min_confidence,
-                min_points=config.dynamic_classifier.buffer_size,
-            ),
-            fallback=DynamicGestureClassifier(config.dynamic_classifier),
-        )
+    dynamic_model_path = (
+        None if args.no_dynamic_model else _resolve_dynamic_model_path(args.dynamic_model)
+    )
+    if dynamic_model_path is not None:
+        try:
+            dynamic_classifier = FallbackDynamicGestureClassifier(
+                primary=SklearnDynamicGestureClassifier.load_path(
+                    dynamic_model_path,
+                    min_confidence=config.command_mapping.min_confidence,
+                    min_points=max(
+                        config.dynamic_classifier.min_window_points,
+                        config.dynamic_classifier.buffer_size // 3,
+                    ),
+                ),
+                fallback=DynamicGestureClassifier(config.dynamic_classifier),
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            LOGGER.warning(
+                "Cannot load dynamic model %s; using heuristics: %s", dynamic_model_path, exc
+            )
     pipeline = GestureControlPipeline(
         config=config,
         static_classifier=static_classifier,
@@ -160,6 +184,12 @@ def _log_debug_result(result: PipelineResult) -> None:
         result.selected_prediction.gesture_id.name,
         result.command_event.command.value if result.command_event is not None else "-",
     )
+
+
+def _resolve_dynamic_model_path(model_path: str | None) -> Path | None:
+    if model_path is not None:
+        return Path(model_path)
+    return DEFAULT_DYNAMIC_MODEL_PATH if DEFAULT_DYNAMIC_MODEL_PATH.exists() else None
 
 
 if __name__ == "__main__":
