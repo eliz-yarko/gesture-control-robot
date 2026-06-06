@@ -32,18 +32,26 @@ class DynamicGestureClassifier:
             return GesturePrediction.unknown("trajectory_buffer_not_ready")
 
         recent_points = points[-self._config.buffer_size :]
-        for detector in (
-            self._detect_wave_lr,
-            self._detect_circle,
-            self._detect_pull_toward,
-        ):
+        predictions: list[GesturePrediction] = []
+        for detector in (self._detect_wave_lr, self._detect_circle, self._detect_pull_toward):
             prediction = _best_prediction_for_recent_windows(
                 recent_points,
                 min_window_points=window_points,
                 detector=detector,
             )
             if prediction is not None:
-                return prediction
+                predictions.append(prediction)
+
+        if predictions:
+            selected = max(predictions, key=_dynamic_prediction_score)
+            return GesturePrediction(
+                gesture_id=selected.gesture_id,
+                confidence=selected.confidence,
+                metadata={
+                    **selected.metadata,
+                    "candidate_count": len(predictions),
+                },
+            )
 
         return GesturePrediction.unknown("dynamic_rules_no_match")
 
@@ -567,6 +575,11 @@ def _best_prediction_for_recent_windows(
         if best_prediction is None or prediction.confidence > best_prediction.confidence:
             best_prediction = prediction
     return best_prediction
+
+
+def _dynamic_prediction_score(prediction: GesturePrediction) -> tuple[float, float]:
+    window_points = float(prediction.metadata.get("window_points", 0))
+    return (prediction.confidence, window_points)
 
 
 def _recent_windows(

@@ -66,6 +66,17 @@ class DynamicClassifierConfig:
 
 
 @dataclass(frozen=True)
+class PredictionSmoothingConfig:
+    """Temporal smoothing for frame-level classifier predictions."""
+
+    enabled: bool = True
+    static_window_size: int = 5
+    static_min_votes: int = 2
+    static_min_confidence: float = 0.45
+    conflict_margin: float = 0.08
+
+
+@dataclass(frozen=True)
 class CalibrationConfig:
     """Adaptive user calibration settings."""
 
@@ -79,9 +90,9 @@ class CalibrationConfig:
 class CommandMappingConfig:
     """Debouncing and command emission settings."""
 
-    static_confirmation_frames: int = 5
+    static_confirmation_frames: int = 3
     dynamic_confirmation_frames: int = 1
-    emergency_confirmation_frames: int = 3
+    emergency_confirmation_frames: int = 2
     min_confidence: float = 0.65
     repeat_same_command: bool = False
 
@@ -104,6 +115,9 @@ class AppConfig:
     hand_detection: HandDetectionConfig = field(default_factory=HandDetectionConfig)
     static_classifier: StaticClassifierConfig = field(default_factory=StaticClassifierConfig)
     dynamic_classifier: DynamicClassifierConfig = field(default_factory=DynamicClassifierConfig)
+    prediction_smoothing: PredictionSmoothingConfig = field(
+        default_factory=PredictionSmoothingConfig
+    )
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     command_mapping: CommandMappingConfig = field(default_factory=CommandMappingConfig)
     sender: SenderConfig = field(default_factory=SenderConfig)

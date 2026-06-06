@@ -16,6 +16,7 @@ from src.recognition.model_classifier import (
     FallbackStaticGestureClassifier,
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
+    load_threshold_profile,
 )
 from src.recognition.static_classifier import FingerStates, StaticGestureClassifier
 from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
@@ -39,4 +40,5 @@ __all__ = [
     "StaticPoseAnalysis",
     "analyze_static_pose",
     "expected_pose_for",
+    "load_threshold_profile",
 ]

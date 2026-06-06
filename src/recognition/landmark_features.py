@@ -15,7 +15,10 @@ from src.utils.geometry import (
 )
 
 STATIC_FEATURE_VERSION = "static_landmarks_v1"
-DYNAMIC_FEATURE_VERSION = "trajectory_landmarks_v1"
+DYNAMIC_FEATURE_VERSION_V1 = "trajectory_landmarks_v1"
+DYNAMIC_FEATURE_VERSION_V2 = "trajectory_landmarks_v2"
+DYNAMIC_FEATURE_VERSION = "trajectory_landmarks_v3"
+DYNAMIC_SEQUENCE_STEPS = 16
 
 
 def extract_static_features(raw_landmarks: LandmarkSequence) -> tuple[float, ...]:
@@ -48,8 +51,129 @@ def extract_static_features(raw_landmarks: LandmarkSequence) -> tuple[float, ...
     return tuple(features)
 
 
-def extract_trajectory_features(points: list[TrajectoryPoint]) -> tuple[float, ...]:
+def extract_trajectory_features(
+    points: list[TrajectoryPoint],
+    feature_version: str = DYNAMIC_FEATURE_VERSION,
+) -> tuple[float, ...]:
     """Extract aggregate trajectory features for a dynamic gesture model."""
+
+    if feature_version == DYNAMIC_FEATURE_VERSION_V1:
+        return _extract_trajectory_features_v1(points)
+    if feature_version == DYNAMIC_FEATURE_VERSION_V2:
+        return _extract_trajectory_features_v2(points)
+    if feature_version != DYNAMIC_FEATURE_VERSION:
+        raise ValueError(f"Unsupported dynamic feature version: {feature_version!r}")
+
+    base_features = _extract_trajectory_features_v2(points)
+    return (*base_features, *_extract_temporal_sequence_features(points))
+
+
+def _extract_trajectory_features_v2(points: list[TrajectoryPoint]) -> tuple[float, ...]:
+    """Extract aggregate trajectory features used by the v2 dynamic model."""
+
+    base_features = _extract_trajectory_features_v1(points)
+    if not points:
+        return (*base_features, *((0.0,) * 18))
+
+    palm_xs = [point.palm_center[0] for point in points]
+    palm_ys = [point.palm_center[1] for point in points]
+    index_xs = [point.index_tip[0] for point in points]
+    index_ys = [point.index_tip[1] for point in points]
+    sizes = [point.hand_size for point in points]
+
+    palm_path = _path_length(palm_xs, palm_ys)
+    index_path = _path_length(index_xs, index_ys)
+    palm_displacement = _displacement(palm_xs, palm_ys)
+    index_displacement = _displacement(index_xs, index_ys)
+    palm_x_range = _range(palm_xs)
+    palm_y_range = _range(palm_ys)
+    index_x_range = _range(index_xs)
+    index_y_range = _range(index_ys)
+    palm_signed_angle = _signed_unwrapped_angle_span(palm_xs, palm_ys)
+    index_signed_angle = _signed_unwrapped_angle_span(index_xs, index_ys)
+    size_range = _range(sizes)
+    early_size, late_size = _early_late_medians(sizes)
+
+    return (
+        *base_features,
+        _axis_balance(palm_x_range, palm_y_range),
+        _axis_balance(index_x_range, index_y_range),
+        _safe_ratio(palm_displacement, palm_path),
+        _safe_ratio(index_displacement, index_path),
+        _safe_ratio(palm_displacement, max(palm_x_range, palm_y_range, 1e-9)),
+        _safe_ratio(index_displacement, max(index_x_range, index_y_range, 1e-9)),
+        _safe_ratio(palm_path, max(palm_displacement, 1e-9)),
+        _safe_ratio(index_path, max(index_displacement, 1e-9)),
+        _safe_ratio(palm_path, max(index_path, 1e-9)),
+        _safe_ratio(index_path, max(palm_path, 1e-9)),
+        _positive_step_ratio(sizes),
+        _positive_step_ratio([-value for value in sizes]),
+        _linear_slope(sizes),
+        _safe_ratio(size_range, min(sizes) if sizes else 0.0),
+        _safe_ratio(late_size - early_size, max(size_range, 1e-9)),
+        palm_signed_angle,
+        index_signed_angle,
+        abs(index_signed_angle) - abs(palm_signed_angle),
+    )
+
+
+def _extract_temporal_sequence_features(points: list[TrajectoryPoint]) -> tuple[float, ...]:
+    """Extract a fixed-length resampled motion trace for temporal classifiers."""
+
+    if not points:
+        return (0.0,) * _temporal_sequence_feature_count()
+
+    palm_xs = _resampled_series([point.palm_center[0] for point in points], DYNAMIC_SEQUENCE_STEPS)
+    palm_ys = _resampled_series([point.palm_center[1] for point in points], DYNAMIC_SEQUENCE_STEPS)
+    palm_zs = _resampled_series([point.palm_center[2] for point in points], DYNAMIC_SEQUENCE_STEPS)
+    index_xs = _resampled_series([point.index_tip[0] for point in points], DYNAMIC_SEQUENCE_STEPS)
+    index_ys = _resampled_series([point.index_tip[1] for point in points], DYNAMIC_SEQUENCE_STEPS)
+    index_zs = _resampled_series([point.index_tip[2] for point in points], DYNAMIC_SEQUENCE_STEPS)
+    sizes = _resampled_series([point.hand_size for point in points], DYNAMIC_SEQUENCE_STEPS)
+    reference_size = max(median([point.hand_size for point in points]), 1e-9)
+
+    frame_features: list[float] = []
+    for index in range(DYNAMIC_SEQUENCE_STEPS):
+        palm_x = _safe_ratio(palm_xs[index] - palm_xs[0], reference_size)
+        palm_y = _safe_ratio(palm_ys[index] - palm_ys[0], reference_size)
+        palm_z = _safe_ratio(palm_zs[index] - palm_zs[0], reference_size)
+        index_x = _safe_ratio(index_xs[index] - index_xs[0], reference_size)
+        index_y = _safe_ratio(index_ys[index] - index_ys[0], reference_size)
+        index_z = _safe_ratio(index_zs[index] - index_zs[0], reference_size)
+        frame_features.extend(
+            (
+                palm_x,
+                palm_y,
+                palm_z,
+                index_x,
+                index_y,
+                index_z,
+                _safe_ratio(index_xs[index] - palm_xs[index], reference_size),
+                _safe_ratio(index_ys[index] - palm_ys[index], reference_size),
+                _safe_ratio(index_zs[index] - palm_zs[index], reference_size),
+                _safe_ratio(sizes[index], reference_size) - 1.0,
+            )
+        )
+
+    motion_channels = (
+        _normalized_series(palm_xs, reference_size),
+        _normalized_series(palm_ys, reference_size),
+        _normalized_series(index_xs, reference_size),
+        _normalized_series(index_ys, reference_size),
+        [_safe_ratio(size, reference_size) for size in sizes],
+    )
+    velocity_features: list[float] = []
+    acceleration_features: list[float] = []
+    for channel in motion_channels:
+        velocities = _differences(channel)
+        velocity_features.extend(velocities)
+        acceleration_features.extend(_differences(velocities))
+
+    return (*frame_features, *velocity_features, *acceleration_features)
+
+
+def _extract_trajectory_features_v1(points: list[TrajectoryPoint]) -> tuple[float, ...]:
+    """Extract the original aggregate trajectory feature vector."""
 
     if not points:
         return (0.0,) * 32
@@ -160,6 +284,26 @@ def _circular_features(xs: list[float], ys: list[float]) -> tuple[float, float, 
     return (mean_radius, radius_cv, _unwrapped_angle_span(angles))
 
 
+def _signed_unwrapped_angle_span(xs: list[float], ys: list[float]) -> float:
+    if len(xs) < 2:
+        return 0.0
+
+    center_x = fmean(xs)
+    center_y = fmean(ys)
+    angles = [math.atan2(y - center_y, x - center_x) for x, y in zip(xs, ys, strict=True)]
+    total = 0.0
+    previous = angles[0]
+    for angle in angles[1:]:
+        delta = angle - previous
+        while delta > math.pi:
+            delta -= 2 * math.pi
+        while delta < -math.pi:
+            delta += 2 * math.pi
+        total += delta
+        previous = angle
+    return total
+
+
 def _unwrapped_angle_span(angles: list[float]) -> float:
     if not angles:
         return 0.0
@@ -208,6 +352,31 @@ def _direction_changes(values: list[float]) -> int:
     return changes
 
 
+def _axis_balance(x_range: float, y_range: float) -> float:
+    return min(x_range, y_range) / max(x_range, y_range, 1e-9)
+
+
+def _positive_step_ratio(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    positive_steps = sum(
+        1 for first, second in zip(values, values[1:], strict=False) if second >= first - 1e-6
+    )
+    return positive_steps / (len(values) - 1)
+
+
+def _linear_slope(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean_x = (len(values) - 1) / 2
+    mean_y = fmean(values)
+    denominator = sum((index - mean_x) ** 2 for index in range(len(values)))
+    if denominator == 0.0:
+        return 0.0
+    numerator = sum((index - mean_x) * (value - mean_y) for index, value in enumerate(values))
+    return numerator / denominator
+
+
 def _early_late_medians(values: list[float]) -> tuple[float, float]:
     if not values:
         return (0.0, 0.0)
@@ -220,6 +389,49 @@ def _half_medians(values: list[float]) -> tuple[float, float]:
         return (0.0, 0.0)
     middle = max(1, len(values) // 2)
     return (median(values[:middle]), median(values[middle:]) if values[middle:] else values[-1])
+
+
+def _temporal_sequence_feature_count() -> int:
+    frame_channels = 10
+    velocity_channels = 5
+    acceleration_channels = 5
+    return (
+        DYNAMIC_SEQUENCE_STEPS * frame_channels
+        + (DYNAMIC_SEQUENCE_STEPS - 1) * velocity_channels
+        + (DYNAMIC_SEQUENCE_STEPS - 2) * acceleration_channels
+    )
+
+
+def _resampled_series(values: list[float], target_count: int) -> list[float]:
+    if target_count <= 0:
+        return []
+    if not values:
+        return [0.0] * target_count
+    if len(values) == 1:
+        return [values[0]] * target_count
+    if target_count == 1:
+        return [values[0]]
+
+    last_index = len(values) - 1
+    result: list[float] = []
+    for output_index in range(target_count):
+        source_position = output_index * last_index / (target_count - 1)
+        left_index = math.floor(source_position)
+        right_index = min(last_index, left_index + 1)
+        fraction = source_position - left_index
+        result.append(values[left_index] * (1 - fraction) + values[right_index] * fraction)
+    return result
+
+
+def _normalized_series(values: list[float], reference_size: float) -> list[float]:
+    if not values:
+        return []
+    origin = values[0]
+    return [_safe_ratio(value - origin, reference_size) for value in values]
+
+
+def _differences(values: list[float]) -> list[float]:
+    return [second - first for first, second in zip(values, values[1:], strict=False)]
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:

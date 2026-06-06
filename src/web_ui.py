@@ -36,6 +36,7 @@ from src.recognition import (
     StaticGestureClassifier,
     StaticPoseAnalysis,
     expected_pose_for,
+    load_threshold_profile,
 )
 from src.transmission.base_sender import CommandSender
 from src.transmission.mock_sender import MockCommandSender
@@ -43,7 +44,26 @@ from src.transmission.serial_sender import SerialCommandSender
 
 LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DYNAMIC_MODEL_PATH = PROJECT_ROOT / "models" / "dynamic_gesture_classifier.joblib"
+DEFAULT_STATIC_MODEL_CANDIDATES = (
+    PROJECT_ROOT / "models" / "static_gesture_classifier_windowed_v3_min5.joblib",
+    PROJECT_ROOT / "models" / "static_gesture_classifier_windowed_v2_min5.joblib",
+    PROJECT_ROOT / "models" / "static_gesture_classifier_windowed_v2.joblib",
+    PROJECT_ROOT / "models" / "static_gesture_classifier.joblib",
+)
+DEFAULT_DYNAMIC_MODEL_CANDIDATES = (
+    PROJECT_ROOT / "models" / "dynamic_gesture_classifier_windowed_v3_open_ipn_min5.joblib",
+    PROJECT_ROOT / "models" / "dynamic_gesture_classifier_windowed_v3_min5.joblib",
+    PROJECT_ROOT / "models" / "dynamic_gesture_classifier_windowed_v2_min5.joblib",
+    PROJECT_ROOT / "models" / "dynamic_gesture_classifier_windowed_v2.joblib",
+    PROJECT_ROOT / "models" / "dynamic_gesture_classifier.joblib",
+)
+DEFAULT_THRESHOLD_PROFILE_CANDIDATES = (
+    PROJECT_ROOT / "models" / "own_control_windowed_v3_open_ipn_min5_hybrid_threshold_profile.json",
+    PROJECT_ROOT / "models" / "own_control_windowed_v3_min5_threshold_profile.json",
+    PROJECT_ROOT / "models" / "own_control_windowed_v2_min5_threshold_profile.json",
+    PROJECT_ROOT / "models" / "own_control_windowed_v2_clean_threshold_profile.json",
+    PROJECT_ROOT / "models" / "own_control_threshold_profile.json",
+)
 
 HAND_CONNECTIONS = (
     (0, 1),
@@ -340,6 +360,8 @@ class BrowserFrameProcessor:
         jpeg_quality: int,
         static_model: str | None = None,
         dynamic_model: str | None = None,
+        static_threshold_profile: str | None = None,
+        dynamic_threshold_profile: str | None = None,
     ) -> None:
         """Initialize decoder, pipeline, and per-session timing state."""
 
@@ -354,6 +376,8 @@ class BrowserFrameProcessor:
             sender=sender,
             static_model=static_model,
             dynamic_model=dynamic_model,
+            static_threshold_profile=static_threshold_profile,
+            dynamic_threshold_profile=dynamic_threshold_profile,
         )
         self._lock = threading.Lock()
         self._frame_index = 0
@@ -462,6 +486,8 @@ class CaptureWorker:
         jpeg_quality: int,
         static_model: str | None = None,
         dynamic_model: str | None = None,
+        static_threshold_profile: str | None = None,
+        dynamic_threshold_profile: str | None = None,
     ) -> None:
         """Initialize the worker without opening hardware resources."""
 
@@ -474,6 +500,8 @@ class CaptureWorker:
         self._jpeg_quality = jpeg_quality
         self._static_model = static_model
         self._dynamic_model = dynamic_model
+        self._static_threshold_profile = static_threshold_profile
+        self._dynamic_threshold_profile = dynamic_threshold_profile
         self._thread = threading.Thread(target=self._run, name="gesture-ui-capture", daemon=True)
 
     def start(self) -> None:
@@ -496,6 +524,8 @@ class CaptureWorker:
                 sender=self._sender,
                 static_model=self._static_model,
                 dynamic_model=self._dynamic_model,
+                static_threshold_profile=self._static_threshold_profile,
+                dynamic_threshold_profile=self._dynamic_threshold_profile,
             )
             capture = VideoCapture(self._config.video, video_path=self._video_path, cv2_module=cv2)
             self._state.set_state("opening")
@@ -744,7 +774,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--static-model",
         type=str,
         default=None,
-        help="Optional joblib model for static gesture classification.",
+        help=(
+            "Optional joblib model for static gesture classification. "
+            "Defaults to the newest available bundled model when present."
+        ),
+    )
+    parser.add_argument(
+        "--no-static-model",
+        action="store_true",
+        help="Use only the heuristic static classifier, even if a bundled model exists.",
     )
     parser.add_argument(
         "--dynamic-model",
@@ -752,13 +790,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Optional joblib model for dynamic gesture classification. "
-            "Defaults to models/dynamic_gesture_classifier.joblib when present."
+            "Defaults to the newest available bundled model when present."
         ),
     )
     parser.add_argument(
         "--no-dynamic-model",
         action="store_true",
         help="Use only the heuristic dynamic classifier, even if a bundled model exists.",
+    )
+    parser.add_argument(
+        "--static-threshold-profile",
+        type=str,
+        default=None,
+        help="Optional JSON threshold profile for the static model.",
+    )
+    parser.add_argument(
+        "--dynamic-threshold-profile",
+        type=str,
+        default=None,
+        help="Optional JSON threshold profile for the dynamic model.",
     )
     parser.add_argument(
         "--sender",
@@ -806,6 +856,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         transport=args.sender,
         command_config=config.command_mapping,
     )
+    static_model = "" if args.no_static_model else args.static_model
     dynamic_model = "" if args.no_dynamic_model else args.dynamic_model
     stop_event = threading.Event()
     worker: CaptureWorker | None = None
@@ -817,8 +868,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             config=config,
             sender=sender,
             jpeg_quality=args.jpeg_quality,
-            static_model=args.static_model,
+            static_model=static_model,
             dynamic_model=dynamic_model,
+            static_threshold_profile=args.static_threshold_profile,
+            dynamic_threshold_profile=args.dynamic_threshold_profile,
         )
     else:
         worker = CaptureWorker(
@@ -829,8 +882,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             stop_event=stop_event,
             loop_video=args.loop_video,
             jpeg_quality=args.jpeg_quality,
-            static_model=args.static_model,
+            static_model=static_model,
             dynamic_model=dynamic_model,
+            static_threshold_profile=args.static_threshold_profile,
+            dynamic_threshold_profile=args.dynamic_threshold_profile,
         )
     server = GestureDashboardServer(
         (args.host, args.port),
@@ -874,27 +929,42 @@ def _build_pipeline(
     sender: CommandSender,
     static_model: str | None,
     dynamic_model: str | None,
+    static_threshold_profile: str | None = None,
+    dynamic_threshold_profile: str | None = None,
 ) -> GestureControlPipeline:
     static_classifier = None
     dynamic_classifier = None
-    if static_model is not None:
+    static_model_path = _resolve_static_model_path(static_model)
+    if static_model_path is not None:
+        static_threshold_profile_path = _resolve_threshold_profile_path(static_threshold_profile)
         static_classifier = FallbackStaticGestureClassifier(
             primary=SklearnStaticGestureClassifier.load_path(
-                static_model,
-                min_confidence=config.command_mapping.min_confidence,
+                static_model_path,
+                threshold_profile=(
+                    load_threshold_profile(static_threshold_profile_path)
+                    if static_threshold_profile_path is not None
+                    else None
+                ),
             ),
             fallback=StaticGestureClassifier(config.static_classifier),
         )
     dynamic_model_path = _resolve_dynamic_model_path(dynamic_model)
     if dynamic_model_path is not None:
         try:
+            dynamic_threshold_profile_path = _resolve_threshold_profile_path(
+                dynamic_threshold_profile
+            )
             dynamic_classifier = FallbackDynamicGestureClassifier(
                 primary=SklearnDynamicGestureClassifier.load_path(
                     dynamic_model_path,
-                    min_confidence=config.command_mapping.min_confidence,
                     min_points=max(
                         config.dynamic_classifier.min_window_points,
                         config.dynamic_classifier.buffer_size // 3,
+                    ),
+                    threshold_profile=(
+                        load_threshold_profile(dynamic_threshold_profile_path)
+                        if dynamic_threshold_profile_path is not None
+                        else None
                     ),
                 ),
                 fallback=DynamicGestureClassifier(config.dynamic_classifier),
@@ -918,7 +988,27 @@ def _resolve_dynamic_model_path(model_path: str | None) -> Path | None:
         return None
     if model_path is not None:
         return Path(model_path)
-    return DEFAULT_DYNAMIC_MODEL_PATH if DEFAULT_DYNAMIC_MODEL_PATH.exists() else None
+    return _first_existing(DEFAULT_DYNAMIC_MODEL_CANDIDATES)
+
+
+def _resolve_static_model_path(model_path: str | None) -> Path | None:
+    if model_path == "":
+        return None
+    if model_path is not None:
+        return Path(model_path)
+    return _first_existing(DEFAULT_STATIC_MODEL_CANDIDATES)
+
+
+def _resolve_threshold_profile_path(profile_path: str | None) -> Path | None:
+    if profile_path == "":
+        return None
+    if profile_path is not None:
+        return Path(profile_path)
+    return _first_existing(DEFAULT_THRESHOLD_PROFILE_CANDIDATES)
+
+
+def _first_existing(paths: Sequence[Path]) -> Path | None:
+    return next((path for path in paths if path.exists()), None)
 
 
 def _annotate_frame(
@@ -1205,7 +1295,7 @@ INDEX_HTML = """<!doctype html>
           <div class="settings-grid">
             <label>
               <span data-i18n="stillGesture">Still gesture</span>
-              <input id="staticFramesInput" type="number" min="1" max="12" step="1" value="5">
+              <input id="staticFramesInput" type="number" min="1" max="12" step="1" value="3">
             </label>
             <label>
               <span data-i18n="motionGesture">Motion gesture</span>
@@ -1213,7 +1303,7 @@ INDEX_HTML = """<!doctype html>
             </label>
             <label>
               <span data-i18n="emergencyStop">Emergency stop</span>
-              <input id="emergencyFramesInput" type="number" min="1" max="12" step="1" value="3">
+              <input id="emergencyFramesInput" type="number" min="1" max="12" step="1" value="2">
             </label>
           </div>
           <button

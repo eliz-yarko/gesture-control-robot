@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.build_ipn_manifest import build_ipn_rows  # noqa: E402
 from scripts.train_gesture_models import main as train_models_main  # noqa: E402
+from src.evaluation import read_manifest  # noqa: E402
 from src.evaluation.manifest_builder import (  # noqa: E402
     ManifestRow,
     build_manifest_from_directory,
@@ -72,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Combined manifest path.",
     )
     parser.add_argument(
+        "--extra-manifest",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "Additional image/video/landmark manifest to merge into the training set. "
+            "Can be provided multiple times."
+        ),
+    )
+    parser.add_argument(
         "--limit-per-class",
         type=int,
         default=250,
@@ -101,6 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-frames", type=int, default=120)
     parser.add_argument("--static-min-confidence", type=float, default=0.65)
     parser.add_argument("--dynamic-min-confidence", type=float, default=0.65)
+    parser.add_argument("--min-dynamic-window-points", type=int, default=8)
+    parser.add_argument(
+        "--dynamic-augmentation-copies",
+        type=int,
+        default=0,
+        help="Deterministic jittered copies to add for each dynamic trajectory window.",
+    )
     parser.add_argument("--mirror-frame", action="store_true")
     return parser
 
@@ -115,6 +133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         jester_dir=args.jester_dir,
         own_dir=args.own_dir,
         ipn_root=args.ipn_root,
+        extra_manifests=args.extra_manifest,
         limit_per_class=args.limit_per_class,
         include_unknown=args.include_unknown,
     )
@@ -141,6 +160,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         str(args.static_min_confidence),
         "--dynamic-min-confidence",
         str(args.dynamic_min_confidence),
+        "--min-dynamic-window-points",
+        str(args.min_dynamic_window_points),
+        "--dynamic-augmentation-copies",
+        str(args.dynamic_augmentation_copies),
     ]
     if args.mirror_frame:
         train_args.append("--mirror-frame")
@@ -153,6 +176,7 @@ def build_open_data_manifest(
     jester_dir: Path | None = None,
     own_dir: Path | None = None,
     ipn_root: Path | None = None,
+    extra_manifests: Sequence[Path] = (),
     limit_per_class: int | None = 250,
     include_unknown: bool = False,
 ) -> OpenDataBuildResult:
@@ -193,6 +217,9 @@ def build_open_data_manifest(
         rows.extend(ipn_rows)
         skipped_items += skipped
 
+    for manifest_path in extra_manifests:
+        rows.extend(_rows_from_manifest(manifest_path, output_path.parent))
+
     if not rows:
         raise ValueError("No training rows were collected from the selected open-data sources.")
 
@@ -208,6 +235,33 @@ def build_open_data_manifest(
 
 def _source_manifest_path(output_path: Path, dataset: str) -> Path:
     return output_path.with_name(f"{output_path.stem}_{dataset}.csv")
+
+
+def _rows_from_manifest(manifest_path: Path, output_dir: Path) -> list[ManifestRow]:
+    samples = read_manifest(manifest_path)
+    rows: list[ManifestRow] = []
+    for sample in samples:
+        rows.append(
+            ManifestRow(
+                sample_id=sample.sample_id,
+                path=_relative_path(sample.path, output_dir),
+                expected_gesture=sample.expected_gesture,
+                media_type=sample.media_type,
+                dataset=sample.dataset,
+                condition=sample.condition,
+                distance=sample.distance,
+                start_frame=sample.start_frame,
+                end_frame=sample.end_frame,
+            )
+        )
+    return rows
+
+
+def _relative_path(path: Path, output_dir: Path) -> str:
+    try:
+        return path.resolve().relative_to(output_dir.resolve()).as_posix()
+    except ValueError:
+        return str(path.resolve())
 
 
 if __name__ == "__main__":

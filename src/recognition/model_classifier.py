@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
 from src.domain import GestureID, GesturePrediction
 from src.recognition.landmark_features import (
     DYNAMIC_FEATURE_VERSION,
+    DYNAMIC_FEATURE_VERSION_V1,
+    DYNAMIC_FEATURE_VERSION_V2,
     STATIC_FEATURE_VERSION,
     extract_static_features,
     extract_trajectory_features,
@@ -28,6 +32,15 @@ class ModelBundle:
     feature_version: str
     min_confidence: float
     model_type: str
+    class_thresholds: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ThresholdProfile:
+    """Optional confidence thresholds loaded from a tuning JSON file."""
+
+    min_confidence: float | None
+    class_thresholds: dict[str, float]
 
 
 class SklearnStaticGestureClassifier:
@@ -45,6 +58,7 @@ class SklearnStaticGestureClassifier:
         cls,
         path: str | Path,
         min_confidence: float | None = None,
+        threshold_profile: ThresholdProfile | None = None,
     ) -> SklearnStaticGestureClassifier:
         """Load a static gesture classifier from a joblib file."""
 
@@ -53,6 +67,7 @@ class SklearnStaticGestureClassifier:
                 Path(path),
                 expected_feature_version=STATIC_FEATURE_VERSION,
                 min_confidence=min_confidence,
+                threshold_profile=threshold_profile,
             )
         )
 
@@ -69,7 +84,11 @@ class SklearnDynamicGestureClassifier:
     def __init__(self, bundle: ModelBundle, min_points: int = 30) -> None:
         """Initialize the classifier from a loaded model bundle."""
 
-        if bundle.feature_version != DYNAMIC_FEATURE_VERSION:
+        if bundle.feature_version not in {
+            DYNAMIC_FEATURE_VERSION,
+            DYNAMIC_FEATURE_VERSION_V1,
+            DYNAMIC_FEATURE_VERSION_V2,
+        }:
             raise ValueError(f"Unsupported dynamic feature version: {bundle.feature_version!r}")
         self._bundle = bundle
         self._min_points = min_points
@@ -80,14 +99,20 @@ class SklearnDynamicGestureClassifier:
         path: str | Path,
         min_confidence: float | None = None,
         min_points: int = 30,
+        threshold_profile: ThresholdProfile | None = None,
     ) -> SklearnDynamicGestureClassifier:
         """Load a dynamic gesture classifier from a joblib file."""
 
         return cls(
             _load_bundle(
                 Path(path),
-                expected_feature_version=DYNAMIC_FEATURE_VERSION,
+                expected_feature_version=(
+                    DYNAMIC_FEATURE_VERSION,
+                    DYNAMIC_FEATURE_VERSION_V2,
+                    DYNAMIC_FEATURE_VERSION_V1,
+                ),
                 min_confidence=min_confidence,
+                threshold_profile=threshold_profile,
             ),
             min_points=min_points,
         )
@@ -98,7 +123,7 @@ class SklearnDynamicGestureClassifier:
         points = buffer.points()
         if len(points) < self._min_points:
             return GesturePrediction.unknown("trajectory_too_short")
-        features = extract_trajectory_features(points)
+        features = extract_trajectory_features(points, feature_version=self._bundle.feature_version)
         return _predict_from_features(self._bundle, features)
 
 
@@ -175,6 +200,8 @@ def _should_prefer_dynamic_fallback(
         return False
     if fallback_prediction.confidence < 0.75:
         return False
+    if model_prediction.confidence >= 0.55:
+        return False
     if model_prediction.gesture_id != GestureID.CIRCLE:
         return False
     return fallback_prediction.gesture_id in {GestureID.WAVE_LR, GestureID.PULL_TOWARD}
@@ -182,8 +209,9 @@ def _should_prefer_dynamic_fallback(
 
 def _load_bundle(
     path: Path,
-    expected_feature_version: str,
+    expected_feature_version: str | tuple[str, ...],
     min_confidence: float | None = None,
+    threshold_profile: ThresholdProfile | None = None,
 ) -> ModelBundle:
     if not path.exists():
         raise FileNotFoundError(f"Model file does not exist: {path}")
@@ -194,10 +222,13 @@ def _load_bundle(
         raise ValueError(f"Model file must contain a dictionary bundle: {path}")
 
     feature_version = str(payload.get("feature_version", ""))
-    if feature_version != expected_feature_version:
-        raise ValueError(
-            f"Expected feature version {expected_feature_version!r}, got {feature_version!r}"
-        )
+    expected_versions = (
+        (expected_feature_version,)
+        if isinstance(expected_feature_version, str)
+        else expected_feature_version
+    )
+    if feature_version not in expected_versions:
+        raise ValueError(f"Expected feature version {expected_versions!r}, got {feature_version!r}")
 
     model = payload.get("model")
     if model is None:
@@ -211,17 +242,31 @@ def _load_bundle(
         raise ValueError(f"Model bundle does not contain label names: {path}")
 
     bundle_min_confidence = float(payload.get("min_confidence", 0.45))
+    bundle_class_thresholds = _normalize_threshold_mapping(
+        cast(Mapping[str, Any], payload.get("class_thresholds") or {})
+    )
+    if threshold_profile is not None:
+        if threshold_profile.min_confidence is not None:
+            bundle_min_confidence = threshold_profile.min_confidence
+        bundle_class_thresholds.update(threshold_profile.class_thresholds)
+
     effective_min_confidence = (
         bundle_min_confidence
         if min_confidence is None
         else max(bundle_min_confidence, min_confidence)
     )
+    if min_confidence is not None:
+        bundle_class_thresholds = {
+            label: max(threshold, min_confidence)
+            for label, threshold in bundle_class_thresholds.items()
+        }
 
     return ModelBundle(
         model=model,
         label_names=label_names,
         feature_version=feature_version,
         min_confidence=effective_min_confidence,
+        class_thresholds=bundle_class_thresholds,
         model_type=str(payload.get("model_type", "sklearn")),
     )
 
@@ -235,7 +280,8 @@ def _predict_from_features(bundle: ModelBundle, features: tuple[float, ...]) -> 
     best_index = max(range(len(probabilities)), key=lambda index: float(probabilities[index]))
     confidence = float(probabilities[best_index])
     label = normalize_label(classes[best_index])
-    if confidence < bundle.min_confidence:
+    threshold = bundle.class_thresholds.get(label, bundle.min_confidence)
+    if confidence < threshold:
         return GesturePrediction.unknown("model_confidence_below_threshold")
 
     try:
@@ -249,5 +295,38 @@ def _predict_from_features(bundle: ModelBundle, features: tuple[float, ...]) -> 
         metadata={
             "classifier": bundle.model_type,
             "feature_version": bundle.feature_version,
+            "threshold": threshold,
         },
     )
+
+
+def load_threshold_profile(path: str | Path) -> ThresholdProfile:
+    """Load a confidence-threshold profile from JSON."""
+
+    profile_path = Path(path)
+    payload = json.loads(profile_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Threshold profile must contain a JSON object: {profile_path}")
+
+    min_confidence_value = payload.get("min_confidence")
+    min_confidence = (
+        None if min_confidence_value is None else _validated_threshold(min_confidence_value)
+    )
+    class_thresholds = _normalize_threshold_mapping(
+        cast(Mapping[str, Any], payload.get("class_thresholds", {}))
+    )
+    return ThresholdProfile(min_confidence=min_confidence, class_thresholds=class_thresholds)
+
+
+def _normalize_threshold_mapping(values: Mapping[str, Any]) -> dict[str, float]:
+    return {
+        normalize_label(label): _validated_threshold(threshold)
+        for label, threshold in values.items()
+    }
+
+
+def _validated_threshold(value: Any) -> float:
+    threshold = float(value)
+    if threshold < 0.0 or threshold > 1.0:
+        raise ValueError(f"Confidence threshold must be in [0, 1], got {threshold}")
+    return threshold

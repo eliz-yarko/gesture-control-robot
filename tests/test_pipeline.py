@@ -37,6 +37,24 @@ def test_pipeline_returns_unknown_when_no_hand_detected() -> None:
     assert result.command_event is None
 
 
+def test_pipeline_smooths_short_static_unknown_gap() -> None:
+    pipeline = GestureControlPipeline(
+        detector=_FakeDetector([HandDetection(_open_palm_landmarks(), "Right", 0.95)]),
+        static_classifier=_SequenceStaticClassifier(
+            [
+                GesturePrediction(GestureID.OPEN_PALM, 0.92),
+                GesturePrediction(GestureID.OPEN_PALM, 0.91),
+                GesturePrediction.unknown("model_confidence_below_threshold"),
+            ]
+        ),
+    )
+
+    results = _process_frames(pipeline, 3)
+
+    assert results[-1].static_prediction.gesture_id == GestureID.OPEN_PALM
+    assert results[-1].static_prediction.metadata["smoothed_from"] == "UNKNOWN"
+
+
 def test_pipeline_keeps_emergency_stop_over_dynamic_candidate() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
@@ -332,6 +350,17 @@ class _FakeStaticClassifier:
 
     def classify(self, raw_landmarks: object) -> GesturePrediction:
         return self._prediction
+
+
+class _SequenceStaticClassifier:
+    def __init__(self, predictions: list[GesturePrediction]) -> None:
+        self._predictions = predictions
+        self._index = 0
+
+    def classify(self, raw_landmarks: object) -> GesturePrediction:
+        prediction = self._predictions[min(self._index, len(self._predictions) - 1)]
+        self._index += 1
+        return prediction
 
 
 class _FakeDynamicClassifier:

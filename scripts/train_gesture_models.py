@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import random
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Sequence
@@ -28,7 +29,7 @@ from src.recognition.landmark_features import (  # noqa: E402
     extract_static_features,
     extract_trajectory_features,
 )
-from src.recognition.trajectory_buffer import TrajectoryBuffer  # noqa: E402
+from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint  # noqa: E402
 from src.utils.geometry import Landmark  # noqa: E402
 from src.utils.metrics import normalize_label  # noqa: E402
 
@@ -50,12 +51,18 @@ class GestureModelTrainer:
         config: AppConfig,
         frame_stride: int,
         max_frames: int | None,
+        min_dynamic_window_points: int,
+        dynamic_augmentation_copies: int,
+        random_state: int,
     ) -> None:
         """Initialize reusable OpenCV and MediaPipe resources."""
 
         self._config = config
         self._frame_stride = frame_stride
         self._max_frames = max_frames
+        self._min_dynamic_window_points = min_dynamic_window_points
+        self._dynamic_augmentation_copies = dynamic_augmentation_copies
+        self._random_state = random_state
         self._cv2 = importlib.import_module("cv2")
         self._detector = HandDetector(config.hand_detection)
 
@@ -93,12 +100,25 @@ class GestureModelTrainer:
             label = normalize_label(sample.expected_gesture)
             target_label = label if _is_dynamic_label(label) else GestureID.UNKNOWN.name
             points = self._extract_trajectory_points(sample)
-            if len(points) < 8:
+            if len(points) < self._min_dynamic_window_points:
                 continue
-            for window in _trajectory_windows(points, self._config.dynamic_classifier.buffer_size):
-                features.append(extract_trajectory_features(window))
-                labels.append(target_label)
-                groups.append(sample.sample_id)
+            for window_index, window in enumerate(
+                _trajectory_windows(
+                    points,
+                    self._config.dynamic_classifier.buffer_size,
+                    min_size=self._min_dynamic_window_points,
+                )
+            ):
+                for augmented_window in _augmented_trajectory_windows(
+                    window,
+                    copies=self._dynamic_augmentation_copies,
+                    random_state=self._random_state,
+                    sample_id=sample.sample_id,
+                    window_index=window_index,
+                ):
+                    features.append(extract_trajectory_features(augmented_window))
+                    labels.append(target_label)
+                    groups.append(sample.sample_id)
 
         return TrainingData(features, labels, groups)
 
@@ -203,10 +223,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--static-min-confidence", type=float, default=0.35)
     parser.add_argument("--dynamic-min-confidence", type=float, default=0.35)
     parser.add_argument(
+        "--min-dynamic-window-points",
+        type=int,
+        default=8,
+        help="Minimum trajectory length used when generating dynamic training windows.",
+    )
+    parser.add_argument(
         "--dynamic-unknown-ratio",
         type=float,
         default=1.5,
         help="Maximum UNKNOWN trajectory windows relative to the largest dynamic class.",
+    )
+    parser.add_argument(
+        "--dynamic-augmentation-copies",
+        type=int,
+        default=0,
+        help="Deterministic jittered copies to add for each dynamic trajectory window.",
     )
     return parser
 
@@ -219,6 +251,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--frame-stride must be positive")
     if args.max_frames is not None and args.max_frames <= 0:
         raise ValueError("--max-frames must be positive when provided")
+    if args.min_dynamic_window_points <= 0:
+        raise ValueError("--min-dynamic-window-points must be positive")
+    if args.dynamic_augmentation_copies < 0:
+        raise ValueError("--dynamic-augmentation-copies must be non-negative")
 
     samples = read_manifest(Path(args.manifest))
     config = AppConfig(
@@ -232,6 +268,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         config=config,
         frame_stride=args.frame_stride,
         max_frames=args.max_frames,
+        min_dynamic_window_points=args.min_dynamic_window_points,
+        dynamic_augmentation_copies=args.dynamic_augmentation_copies,
+        random_state=args.random_state,
     )
     try:
         static_data = trainer.build_static_data(samples)
@@ -341,6 +380,7 @@ def _save_model(
             "feature_version": feature_version,
             "label_names": tuple(sorted(set(data.labels))),
             "min_confidence": min_confidence,
+            "class_thresholds": {},
             "sample_count": len(data.labels),
             "group_count": len(set(data.groups)),
             "class_counts": dict(Counter(data.labels)),
@@ -362,15 +402,105 @@ def _print_summary(name: str, data: TrainingData) -> None:
     print(f"{name} sample groups: {group_summary}")
 
 
-def _trajectory_windows(points: list[Any], max_size: int) -> list[list[Any]]:
-    if len(points) <= max_size:
-        return [points]
+def _augmented_trajectory_windows(
+    window: list[Any],
+    *,
+    copies: int,
+    random_state: int,
+    sample_id: str,
+    window_index: int,
+) -> list[list[Any]]:
+    windows: list[list[Any]] = [window]
+    if copies <= 0 or not all(isinstance(point, TrajectoryPoint) for point in window):
+        return windows
 
+    trajectory_window = [point for point in window if isinstance(point, TrajectoryPoint)]
+    for copy_index in range(copies):
+        rng = random.Random(f"{random_state}:{sample_id}:{window_index}:{copy_index}")
+        windows.append(_jitter_trajectory_window(trajectory_window, rng))
+    return windows
+
+
+def _jitter_trajectory_window(
+    window: Sequence[TrajectoryPoint],
+    rng: random.Random,
+) -> list[TrajectoryPoint]:
+    if not window:
+        return []
+
+    origin = window[0].palm_center
+    reference_size = max(sum(point.hand_size for point in window) / len(window), 1e-9)
+    scale = rng.uniform(0.94, 1.06)
+    translation = tuple(rng.uniform(-0.025, 0.025) * reference_size for _ in range(3))
+    jitter_radius = reference_size * 0.015
+
+    jittered: list[TrajectoryPoint] = []
+    for point in window:
+        palm = _jitter_point(point.palm_center, origin, scale, translation, jitter_radius, rng)
+        index_tip = _jitter_point(point.index_tip, origin, scale, translation, jitter_radius, rng)
+        jittered.append(
+            TrajectoryPoint(
+                palm_center=palm,
+                index_tip=index_tip,
+                hand_size=max(point.hand_size * scale * rng.uniform(0.97, 1.03), 1e-9),
+                timestamp=point.timestamp,
+            )
+        )
+    return jittered
+
+
+def _jitter_point(
+    point: tuple[float, float, float],
+    origin: tuple[float, float, float],
+    scale: float,
+    translation: tuple[float, float, float],
+    jitter_radius: float,
+    rng: random.Random,
+) -> tuple[float, float, float]:
+    return tuple(
+        origin[axis]
+        + (point[axis] - origin[axis]) * scale
+        + translation[axis]
+        + rng.uniform(-jitter_radius, jitter_radius)
+        for axis in range(3)
+    )
+
+
+def _trajectory_windows(
+    points: list[Any],
+    max_size: int,
+    min_size: int = 8,
+) -> list[list[Any]]:
+    if len(points) < min_size:
+        return []
+
+    full_size = min(len(points), max_size)
+    candidate_sizes = sorted(
+        {
+            min_size,
+            max(min_size, min(full_size, len(points) // 2)),
+            max(min_size, min(full_size, (len(points) * 3) // 4)),
+            full_size,
+        }
+    )
     windows: list[list[Any]] = []
-    step = max(1, (len(points) - max_size) // 6)
-    for start in range(0, len(points) - max_size + 1, step):
-        windows.append(points[start : start + max_size])
-    return windows[:8]
+    seen: set[tuple[int, int]] = set()
+    for size in candidate_sizes:
+        for start in _window_starts(len(points), size):
+            key = (start, size)
+            if key in seen:
+                continue
+            seen.add(key)
+            windows.append(points[start : start + size])
+
+    return windows[:12]
+
+
+def _window_starts(point_count: int, size: int) -> list[int]:
+    if point_count <= size:
+        return [0]
+    last_start = point_count - size
+    return sorted({0, last_start // 2, last_start})
 
 
 def _is_static_or_unknown(label: str) -> bool:

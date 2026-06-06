@@ -3,6 +3,8 @@ from __future__ import annotations
 from src.domain import GestureID, GesturePrediction
 from src.recognition.landmark_features import (
     DYNAMIC_FEATURE_VERSION,
+    DYNAMIC_FEATURE_VERSION_V1,
+    DYNAMIC_FEATURE_VERSION_V2,
     STATIC_FEATURE_VERSION,
     extract_static_features,
     extract_trajectory_features,
@@ -13,6 +15,7 @@ from src.recognition.model_classifier import (
     ModelBundle,
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
+    load_threshold_profile,
 )
 from src.recognition.static_classifier import StaticGestureClassifier
 from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
@@ -49,6 +52,37 @@ def test_static_model_classifier_rejects_low_confidence_prediction() -> None:
     prediction = classifier.classify(_open_palm_landmarks())
 
     assert prediction.gesture_id == GestureID.UNKNOWN
+
+
+def test_static_model_classifier_uses_class_specific_threshold() -> None:
+    classifier = SklearnStaticGestureClassifier(
+        ModelBundle(
+            model=_FakeModel(("THUMB_DOWN", "OPEN_PALM"), (0.66, 0.34)),
+            label_names=("THUMB_DOWN", "OPEN_PALM"),
+            feature_version=STATIC_FEATURE_VERSION,
+            min_confidence=0.3,
+            model_type="fake",
+            class_thresholds={"THUMB_DOWN": 0.8},
+        )
+    )
+
+    prediction = classifier.classify(_open_palm_landmarks())
+
+    assert prediction.gesture_id == GestureID.UNKNOWN
+    assert prediction.metadata["reason"] == "model_confidence_below_threshold"
+
+
+def test_load_threshold_profile_normalizes_labels(tmp_path) -> None:
+    profile_path = tmp_path / "thresholds.json"
+    profile_path.write_text(
+        '{"min_confidence": 0.25, "class_thresholds": {"thumb-down": 0.8}}',
+        encoding="utf-8",
+    )
+
+    profile = load_threshold_profile(profile_path)
+
+    assert profile.min_confidence == 0.25
+    assert profile.class_thresholds == {"THUMB_DOWN": 0.8}
 
 
 def test_fallback_static_classifier_uses_rules_after_low_confidence_model() -> None:
@@ -122,6 +156,34 @@ def test_dynamic_model_classifier_waits_for_full_window_by_default() -> None:
     assert prediction.gesture_id == GestureID.UNKNOWN
 
 
+def test_dynamic_model_classifier_accepts_legacy_feature_bundle() -> None:
+    for feature_version in (DYNAMIC_FEATURE_VERSION_V1, DYNAMIC_FEATURE_VERSION_V2):
+        classifier = SklearnDynamicGestureClassifier(
+            ModelBundle(
+                model=_FakeModel(("CIRCLE", "WAVE_LR"), (0.25, 0.75)),
+                label_names=("CIRCLE", "WAVE_LR"),
+                feature_version=feature_version,
+                min_confidence=0.3,
+                model_type="fake",
+            ),
+            min_points=2,
+        )
+        buffer = TrajectoryBuffer(max_size=30)
+        for index, x in enumerate((0.2, 0.6, 0.3)):
+            buffer.add_point(
+                TrajectoryPoint(
+                    palm_center=(x, 0.4, 0.0),
+                    index_tip=(x, 0.2, 0.0),
+                    hand_size=0.2,
+                    timestamp=float(index),
+                )
+            )
+
+        prediction = classifier.classify(buffer)
+
+        assert prediction.gesture_id == GestureID.WAVE_LR
+
+
 def test_fallback_dynamic_classifier_waits_when_model_window_is_short() -> None:
     classifier = FallbackDynamicGestureClassifier(
         primary=_FakeDynamicClassifier(GestureID.UNKNOWN, 0.0, "trajectory_too_short"),
@@ -157,7 +219,7 @@ def test_fallback_dynamic_classifier_uses_rules_after_model_unknown() -> None:
     assert prediction.metadata["fallback_after"] == "model_confidence_below_threshold"
 
 
-def test_fallback_dynamic_classifier_prefers_rule_wave_over_model_circle() -> None:
+def test_fallback_dynamic_classifier_keeps_confident_model_circle() -> None:
     classifier = FallbackDynamicGestureClassifier(
         primary=_FakeDynamicClassifier(GestureID.CIRCLE, 0.92),
         fallback=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
@@ -166,14 +228,13 @@ def test_fallback_dynamic_classifier_prefers_rule_wave_over_model_circle() -> No
 
     prediction = classifier.classify(buffer)
 
-    assert prediction.gesture_id == GestureID.WAVE_LR
-    assert prediction.metadata["overrode_model"] == "CIRCLE"
-    assert prediction.metadata["model_confidence"] == 0.92
+    assert prediction.gesture_id == GestureID.CIRCLE
+    assert "overrode_model" not in prediction.metadata
 
 
-def test_fallback_dynamic_classifier_prefers_rule_pull_over_model_circle() -> None:
+def test_fallback_dynamic_classifier_prefers_rule_pull_over_weak_model_circle() -> None:
     classifier = FallbackDynamicGestureClassifier(
-        primary=_FakeDynamicClassifier(GestureID.CIRCLE, 0.92),
+        primary=_FakeDynamicClassifier(GestureID.CIRCLE, 0.52),
         fallback=_FakeDynamicClassifier(GestureID.PULL_TOWARD, 0.86),
     )
     buffer = TrajectoryBuffer(max_size=30)
@@ -182,6 +243,7 @@ def test_fallback_dynamic_classifier_prefers_rule_pull_over_model_circle() -> No
 
     assert prediction.gesture_id == GestureID.PULL_TOWARD
     assert prediction.metadata["overrode_model"] == "CIRCLE"
+    assert prediction.metadata["model_confidence"] == 0.52
 
 
 def test_feature_extractors_return_stable_lengths() -> None:
@@ -204,7 +266,51 @@ def test_feature_extractors_return_stable_lengths() -> None:
     )
 
     assert len(static_features) == 98
-    assert len(dynamic_features) == 32
+    assert len(dynamic_features) == 355
+    assert (
+        len(
+            extract_trajectory_features(
+                [
+                    TrajectoryPoint(
+                        palm_center=(0.2, 0.4, 0.0),
+                        index_tip=(0.2, 0.2, 0.0),
+                        hand_size=0.2,
+                        timestamp=0.0,
+                    ),
+                    TrajectoryPoint(
+                        palm_center=(0.6, 0.4, 0.0),
+                        index_tip=(0.6, 0.2, 0.0),
+                        hand_size=0.3,
+                        timestamp=1.0,
+                    ),
+                ],
+                feature_version=DYNAMIC_FEATURE_VERSION_V2,
+            )
+        )
+        == 50
+    )
+    assert (
+        len(
+            extract_trajectory_features(
+                [
+                    TrajectoryPoint(
+                        palm_center=(0.2, 0.4, 0.0),
+                        index_tip=(0.2, 0.2, 0.0),
+                        hand_size=0.2,
+                        timestamp=0.0,
+                    ),
+                    TrajectoryPoint(
+                        palm_center=(0.6, 0.4, 0.0),
+                        index_tip=(0.6, 0.2, 0.0),
+                        hand_size=0.3,
+                        timestamp=1.0,
+                    ),
+                ],
+                feature_version=DYNAMIC_FEATURE_VERSION_V1,
+            )
+        )
+        == 32
+    )
 
 
 class _FakeModel:

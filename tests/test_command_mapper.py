@@ -5,6 +5,14 @@ from src.domain import GestureID, GesturePrediction, RobotCommand
 from src.interpretation.command_mapper import CommandMapper
 
 
+def test_command_mapping_defaults_are_low_latency_for_demo() -> None:
+    config = CommandMappingConfig()
+
+    assert config.static_confirmation_frames == 3
+    assert config.dynamic_confirmation_frames == 1
+    assert config.emergency_confirmation_frames == 2
+
+
 def test_command_mapper_emits_static_command_after_debounce() -> None:
     mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=3))
     prediction = GesturePrediction(GestureID.OPEN_PALM, 0.9)

@@ -14,6 +14,7 @@ from src.recognition.dynamic_classifier import DynamicGestureClassifier
 from src.recognition.dynamic_segmenter import DynamicGestureSegmenter
 from src.recognition.gesture_pose import StaticPoseAnalysis, analyze_static_pose
 from src.recognition.hand_detector import HandDetection, HandDetector
+from src.recognition.prediction_smoother import StaticPredictionSmoother
 from src.recognition.static_classifier import StaticGestureClassifier
 from src.recognition.trajectory_buffer import TrajectoryBuffer, trajectory_point_from_landmarks
 from src.transmission.base_sender import CommandSender
@@ -94,6 +95,7 @@ class GestureControlPipeline:
         self._missing_detection_frames = 0
         self._dynamic_cooldown_frames = 0
         self._dynamic_segmenter = DynamicGestureSegmenter(self._config.dynamic_classifier)
+        self._static_smoother = StaticPredictionSmoother(self._config.prediction_smoothing)
         self._pending_dynamic_prediction: GesturePrediction | None = None
         self._pending_dynamic_frames_remaining = 0
 
@@ -107,7 +109,8 @@ class GestureControlPipeline:
         self._missing_detection_frames = 0
         detection = max(detections, key=lambda item: item.score)
         pose_analysis = analyze_static_pose(detection.landmarks, self._config.static_classifier)
-        static_prediction = self._static_classifier.classify(detection.landmarks)
+        raw_static_prediction = self._static_classifier.classify(detection.landmarks)
+        static_prediction = self._static_smoother.update(raw_static_prediction)
         point = trajectory_point_from_landmarks(detection.landmarks, timestamp=frame.timestamp)
         self._trajectory_buffer.add_point(point)
         segment_update = self._dynamic_segmenter.update(point)
@@ -151,6 +154,7 @@ class GestureControlPipeline:
 
     def _process_missing_detection(self, frame: CapturedFrame) -> PipelineResult:
         self._missing_detection_frames += 1
+        self._static_smoother.reset()
         unknown = GesturePrediction.unknown("no_hand_detected")
         segment_update = self._dynamic_segmenter.missing()
         dynamic_prediction, dynamic_state = self._dynamic_prediction_from_segment(

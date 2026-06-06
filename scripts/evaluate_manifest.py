@@ -32,6 +32,7 @@ from src.recognition import (
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
     StaticGestureClassifier,
+    load_threshold_profile,
 )  # noqa: E402
 from src.recognition.trajectory_buffer import TrajectoryBuffer  # noqa: E402
 from src.utils.geometry import Landmark  # noqa: E402
@@ -50,6 +51,9 @@ class SampleEvaluator:
         mirror_frame: bool,
         static_model: Path | None = None,
         dynamic_model: Path | None = None,
+        static_threshold_profile: Path | None = None,
+        dynamic_threshold_profile: Path | None = None,
+        dynamic_min_points: int | None = None,
         fallback_to_heuristics: bool = False,
     ) -> None:
         """Initialize reusable detector and classifier objects."""
@@ -64,11 +68,14 @@ class SampleEvaluator:
         self._static_classifier = _build_static_classifier(
             config,
             static_model,
+            static_threshold_profile,
             fallback_to_heuristics,
         )
         self._dynamic_classifier = _build_dynamic_classifier(
             config,
             dynamic_model,
+            dynamic_threshold_profile,
+            dynamic_min_points,
             fallback_to_heuristics,
         )
 
@@ -376,14 +383,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional joblib model for dynamic gesture classification.",
     )
     parser.add_argument(
+        "--static-threshold-profile",
+        type=str,
+        default=None,
+        help="Optional JSON threshold profile for the static model.",
+    )
+    parser.add_argument(
+        "--dynamic-threshold-profile",
+        type=str,
+        default=None,
+        help="Optional JSON threshold profile for the dynamic model.",
+    )
+    parser.add_argument(
+        "--dynamic-min-points",
+        type=int,
+        default=None,
+        help=(
+            "Minimum trajectory points required by the dynamic model. Defaults to "
+            "the runtime value max(min_window_points, buffer_size // 3)."
+        ),
+    )
+    parser.add_argument(
         "--mirror-frame", action="store_true", help="Mirror frames before detection."
     )
     parser.add_argument(
         "--fallback-to-heuristics",
         action="store_true",
         help=(
-            "Use model classifiers with the same heuristic fallback behavior as the "
-            "runtime UI."
+            "Use model classifiers with the same heuristic fallback behavior as the " "runtime UI."
         ),
     )
     parser.add_argument(
@@ -400,6 +427,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.frame_stride <= 0:
         raise ValueError("--frame-stride must be positive")
+    if args.dynamic_min_points is not None and args.dynamic_min_points <= 0:
+        raise ValueError("--dynamic-min-points must be positive when provided")
 
     manifest_path = Path(args.manifest)
     samples = read_manifest(manifest_path)
@@ -418,6 +447,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         mirror_frame=args.mirror_frame,
         static_model=Path(args.static_model) if args.static_model is not None else None,
         dynamic_model=Path(args.dynamic_model) if args.dynamic_model is not None else None,
+        static_threshold_profile=(
+            Path(args.static_threshold_profile)
+            if args.static_threshold_profile is not None
+            else None
+        ),
+        dynamic_threshold_profile=(
+            Path(args.dynamic_threshold_profile)
+            if args.dynamic_threshold_profile is not None
+            else None
+        ),
+        dynamic_min_points=args.dynamic_min_points,
         fallback_to_heuristics=args.fallback_to_heuristics,
     )
     records: list[PredictionRecord] = []
@@ -442,6 +482,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _build_static_classifier(
     config: AppConfig,
     static_model: Path | None,
+    static_threshold_profile: Path | None,
     fallback_to_heuristics: bool,
 ) -> object:
     fallback = StaticGestureClassifier(config.static_classifier)
@@ -450,8 +491,10 @@ def _build_static_classifier(
 
     primary = SklearnStaticGestureClassifier.load_path(
         static_model,
-        min_confidence=(
-            config.command_mapping.min_confidence if fallback_to_heuristics else None
+        threshold_profile=(
+            load_threshold_profile(static_threshold_profile)
+            if static_threshold_profile is not None
+            else None
         ),
     )
     if not fallback_to_heuristics:
@@ -462,24 +505,29 @@ def _build_static_classifier(
 def _build_dynamic_classifier(
     config: AppConfig,
     dynamic_model: Path | None,
+    dynamic_threshold_profile: Path | None,
+    dynamic_min_points: int | None,
     fallback_to_heuristics: bool,
 ) -> object:
     fallback = DynamicGestureClassifier(config.dynamic_classifier)
     if dynamic_model is None:
         return fallback
 
+    effective_min_points = (
+        dynamic_min_points
+        if dynamic_min_points is not None
+        else max(
+            config.dynamic_classifier.min_window_points,
+            config.dynamic_classifier.buffer_size // 3,
+        )
+    )
     primary = SklearnDynamicGestureClassifier.load_path(
         dynamic_model,
-        min_confidence=(
-            config.command_mapping.min_confidence if fallback_to_heuristics else None
-        ),
-        min_points=(
-            max(
-                config.dynamic_classifier.min_window_points,
-                config.dynamic_classifier.buffer_size // 3,
-            )
-            if fallback_to_heuristics
-            else 30
+        min_points=effective_min_points,
+        threshold_profile=(
+            load_threshold_profile(dynamic_threshold_profile)
+            if dynamic_threshold_profile is not None
+            else None
         ),
     )
     if not fallback_to_heuristics:

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 
-from scripts.retrain_open_data import build_open_data_manifest
-from scripts.train_gesture_models import _extract_landmark_frames
+from scripts.retrain_open_data import build_open_data_manifest, build_parser
+from scripts.train_gesture_models import (
+    _augmented_trajectory_windows,
+    _extract_landmark_frames,
+    _jitter_trajectory_window,
+    _trajectory_windows,
+)
 from src.evaluation import read_manifest
+from src.recognition.trajectory_buffer import TrajectoryPoint
 
 
 def test_extract_landmark_frames_reads_sequence_json() -> None:
@@ -16,6 +23,44 @@ def test_extract_landmark_frames_reads_sequence_json() -> None:
 
     assert len(frames) == 2
     assert frames[0][8] == (8.0, 9.0, 0.0)
+
+
+def test_trajectory_windows_include_short_and_full_segments() -> None:
+    points = list(range(12))
+
+    windows = _trajectory_windows(points, max_size=30, min_size=5)
+
+    assert [len(window) for window in windows] == [5, 5, 5, 6, 6, 6, 9, 9, 9, 12]
+    assert windows[0] == [0, 1, 2, 3, 4]
+    assert windows[-1] == points
+
+
+def test_dynamic_augmentation_adds_deterministic_jittered_windows() -> None:
+    points = [
+        TrajectoryPoint(
+            palm_center=(0.2 + index * 0.01, 0.4, 0.0),
+            index_tip=(0.2 + index * 0.01, 0.2, 0.0),
+            hand_size=0.2,
+            timestamp=float(index),
+        )
+        for index in range(5)
+    ]
+
+    windows = _augmented_trajectory_windows(
+        points,
+        copies=2,
+        random_state=42,
+        sample_id="sample",
+        window_index=0,
+    )
+
+    assert len(windows) == 3
+    assert windows[0] == points
+    assert windows[1] != points
+    assert windows[1] == _jitter_trajectory_window(
+        points,
+        random.Random("42:sample:0:0"),
+    )
 
 
 def test_build_open_data_manifest_combines_directory_and_ipn_sources(tmp_path: Path) -> None:
@@ -51,3 +96,39 @@ def test_build_open_data_manifest_combines_directory_and_ipn_sources(tmp_path: P
     samples = read_manifest(output_path)
     assert [sample.expected_gesture for sample in samples] == ["FIST", "OK_SIGN", "WAVE_LR"]
     assert samples[1].media_type == "landmarks"
+
+
+def test_build_open_data_manifest_merges_extra_manifest(tmp_path: Path) -> None:
+    landmark_path = tmp_path / "landmarks" / "sample.json"
+    landmark_path.parent.mkdir()
+    landmark_path.write_text(
+        json.dumps({"frames": [{"landmarks": [[0.0, 0.0, 0.0] for _ in range(21)]}]}),
+        encoding="utf-8",
+    )
+    extra_manifest = tmp_path / "extra.csv"
+    extra_manifest.write_text(
+        "\n".join(
+            [
+                "sample_id,path,expected_gesture,media_type,dataset,condition,distance",
+                f"extra_001,{landmark_path},OPEN_PALM,landmarks,own_control,cached,mixed",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "combined.csv"
+
+    result = build_open_data_manifest(
+        output_path=output_path,
+        extra_manifests=(extra_manifest,),
+    )
+
+    samples = read_manifest(output_path)
+    assert result.counts_by_gesture == {"OPEN_PALM": 1}
+    assert samples[0].sample_id == "extra_001"
+    assert samples[0].media_type == "landmarks"
+
+
+def test_open_data_parser_accepts_dynamic_augmentation_copies() -> None:
+    args = build_parser().parse_args(["--dynamic-augmentation-copies", "2"])
+
+    assert args.dynamic_augmentation_copies == 2
