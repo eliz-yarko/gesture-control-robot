@@ -145,10 +145,13 @@ def test_dashboard_camera_stop_returns_to_idle_preview() -> None:
     assert "videoManuallyStopped" in APP_JS
     assert "clearVideoFrame" in APP_JS
     assert ".video-stage:not(.video-started) img" in STYLES_CSS
-    assert "sideStartButton.classList.toggle(\"is-hidden\", Boolean(started))" in APP_JS
-    assert "reloadStream();" not in APP_JS.split("function stopBrowserCamera()", 1)[1].split(
-        "async function startVideo()", 1
-    )[0]
+    assert 'sideStartButton.classList.toggle("is-hidden", Boolean(started))' in APP_JS
+    assert (
+        "reloadStream();"
+        not in APP_JS.split("function stopBrowserCamera()", 1)[1].split(
+            "async function startVideo()", 1
+        )[0]
+    )
 
 
 def test_annotated_camera_frame_does_not_draw_text_overlay() -> None:

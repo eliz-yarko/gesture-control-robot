@@ -54,9 +54,7 @@ class DynamicGestureSegmenter:
             self._active_points.append(point)
             energy = max(
                 instant_energy,
-                _window_motion_energy(
-                    self._active_points[-(self._config.motion_end_frames + 1) :]
-                ),
+                _window_motion_energy(self._active_points[-(self._config.motion_end_frames + 1) :]),
             )
             if energy <= self._config.motion_end_threshold:
                 self._still_frames += 1

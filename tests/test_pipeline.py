@@ -68,7 +68,7 @@ def test_pipeline_suppresses_static_commands_while_dynamic_motion_is_recording()
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
-            )
+            ),
         ),
         detector=_SequenceDetector(_moving_open_palm_detections((0.0, 0.03, 0.07))),
         static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
@@ -91,7 +91,7 @@ def test_pipeline_emits_dynamic_command_after_segment_finishes() -> None:
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
-            )
+            ),
         ),
         detector=_SequenceDetector(_moving_open_palm_detections(_finished_motion_offsets())),
         static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
@@ -145,7 +145,7 @@ def test_pipeline_confirms_dynamic_segment_for_configured_frame_count() -> None:
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=3,
-            )
+            ),
         ),
         detector=_SequenceDetector(
             _moving_open_palm_detections((*_finished_motion_offsets(), 0.30, 0.30))
@@ -224,7 +224,7 @@ def test_pipeline_emits_active_dynamic_segment_during_detection_gap() -> None:
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
-            )
+            ),
         ),
         detector=_SequenceDetector(
             [
@@ -276,7 +276,7 @@ def test_pipeline_applies_dynamic_cooldown_after_dynamic_command() -> None:
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
-            )
+            ),
         ),
         detector=_SequenceDetector(
             _moving_open_palm_detections((*_finished_motion_offsets(), 0.30))

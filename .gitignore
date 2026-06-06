@@ -5,13 +5,16 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv*/
 venv/
 env/
+.env
 .pytest_cache/
 .coverage
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.ipynb_checkpoints/
 
 # IDE
 .vscode/
@@ -37,7 +40,6 @@ models/*.pkl
 
 # Output
 *.log
+*.tmp
 *.docx
 scripts/tmp_*
-docs/thesis/figures/*.png
-!docs/thesis/figures/.gitkeep

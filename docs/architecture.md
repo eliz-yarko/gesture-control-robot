@@ -1,11 +1,10 @@
 # Архітектура підсистеми жестового керування
 
-## Мета foundation-рівня
+## Мета
 
-Foundation-рівень створено як першу робочу основу дипломного проєкту. Його задача -
-відокремити доменні поняття, розпізнавання жестів, інтерпретацію команд і транспортний
-шар так, щоб надалі можна було додати LSTM-класифікатор, адаптивне калібрування та
-UX-фідбек без переписування базової архітектури.
+Архітектура підсистеми розділяє роботу з камерою, розпізнавання жестів, підтвердження
+команд і передавання результату роботу. Це потрібно, щоб одну й ту саму логіку можна було
+запускати в CLI, у web UI, на записаному відео або під час автоматичного benchmark.
 
 ## Компоненти
 
@@ -16,15 +15,17 @@ UX-фідбек без переписування базової архітек�
 4. `src.recognition.hand_detector` - wrapper над MediaPipe Hands, який повертає 21 ключову
    точку руки та handedness.
 5. `src.utils.geometry` - геометричні операції над 21 ключовою точкою MediaPipe Hands.
-6. `src.recognition.static_classifier` - rule-based класифікатор 10 статичних жестів.
+6. `src.recognition.static_classifier` - геометричний класифікатор 10 статичних жестів.
 7. `src.recognition.trajectory_buffer` - буфер ознак траєкторії для динамічних жестів.
-8. `src.recognition.dynamic_classifier` - baseline-класифікатор 3 динамічних жестів.
-9. `src.calibration` - адаптивне калібрування користувача, персональні профілі та
+8. `src.recognition.dynamic_classifier` - евристичний класифікатор 3 динамічних жестів.
+9. `src.recognition.model_classifier` - завантаження навчених `scikit-learn` моделей.
+10. `src.calibration` - адаптивне калібрування користувача, персональні профілі та
    коригування confidence.
-10. `src.interpretation.command_mapper` - debouncing і перетворення жестів у команди.
-11. `src.transmission` - інтерфейси передачі команд: mock, UART, ROS.
-12. `src.pipeline` - прикладний pipeline, який поєднує детекцію, класифікацію,
+11. `src.interpretation.command_mapper` - debouncing і перетворення жестів у команди.
+12. `src.transmission` - інтерфейси передачі команд: in-memory, UART, ROS.
+13. `src.pipeline` - прикладний pipeline, який поєднує детекцію, класифікацію,
     інтерпретацію та відправлення команд.
+14. `src.web_ui` - локальна web-консоль для демонстрації та роботи з browser-camera.
 
 ## Потік даних
 
@@ -35,16 +36,20 @@ flowchart LR
     Static["StaticGestureClassifier\n10 static gestures"]
     Buffer["TrajectoryBuffer\n30-frame window"]
     Dynamic["DynamicGestureClassifier\n3 dynamic gestures"]
+    Model["Sklearn classifiers\noptional joblib models"]
     Calibration["AdaptiveCalibrator\nuser profile"]
     Mapper["CommandMapper\ndebouncing + safety"]
     Sender["CommandSender\nMock / UART / ROS"]
 
     Camera --> Detector
     Detector --> Static
+    Detector --> Model
     Detector --> Buffer
     Buffer --> Dynamic
+    Buffer --> Model
     Static --> Mapper
     Dynamic --> Calibration
+    Model --> Calibration
     Static --> Calibration
     Calibration --> Mapper
     Mapper --> Sender
@@ -68,8 +73,8 @@ flowchart LR
 | 11 | CIRCLE | динамічний | ROTATE_360 |
 | 12 | PULL_TOWARD | динамічний | APPROACH_OPERATOR |
 
-Команди для динамічних жестів є стартовою інженерною гіпотезою. Після UX-дослідження
-словник може бути уточнений, але числові ID залишаються стабільними для датасету.
+Словник жестів зафіксований для коду, моделей і benchmark CSV. Якщо мапінг команд буде
+змінюватися після тестування з користувачами, числові ID жестів варто залишати стабільними.
 
 ## Логіка debouncing
 
@@ -81,11 +86,11 @@ flowchart LR
 Такий підхід знижує ризик хибних спрацювань, що особливо важливо для критичної команди
 `EMERGENCY_STOP`.
 
-## Розширення до дипломної версії
+## Поточні обмеження
 
-Наступні модулі додаються поверх поточного foundation-рівня:
-
-1. LSTM/1D-CNN класифікатор динамічних жестів, який використовує дані `TrajectoryBuffer`.
-2. `feedback` - UX-шар візуального підтвердження команди.
-3. `experiments` - відтворювані експерименти з CSV, графіками та довірчими інтервалами.
-4. `docs/ux_research` - протоколи інтерв'ю, картковий метод, SUS/NASA-TLX.
+1. Навчені моделі краще працюють на власному контрольному наборі, ніж на IPN Hand subset.
+2. ROS-відправник має мінімальний `Twist`-мапінг і потребує перевірки на конкретній платформі.
+3. Дані з `data/external/` і `data/processed/` не зберігаються в Git, тому benchmark відтворюється
+   після локальної підготовки manifest-файлів.
+4. Web UI з browser-camera потребує HTTPS для публічного розгортання, бо браузери блокують
+   камеру і mixed-content запити в небезпечному контексті.

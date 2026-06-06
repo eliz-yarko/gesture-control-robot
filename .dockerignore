@@ -1,9 +1,11 @@
 .git
 .venv
+.venv*
 __pycache__
 .pytest_cache
 .mypy_cache
 .ruff_cache
+.coverage
 htmlcov
 data/external
 data/processed
@@ -11,4 +13,5 @@ data/raw
 docs
 tests
 *.log
+*.tmp
 *.docx

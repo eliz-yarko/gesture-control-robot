@@ -1,4 +1,4 @@
-"""Baseline dynamic gesture classifier using trajectory heuristics."""
+"""Dynamic gesture classifier based on trajectory heuristics."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from src.recognition.trajectory_buffer import TrajectoryBuffer, TrajectoryPoint
 class DynamicGestureClassifier:
     """Recognize dynamic gestures from a fixed-size trajectory buffer.
 
-    This class is the baseline state-machine layer. The planned LSTM classifier
-    will use the same buffer data contract, which keeps experiments comparable.
+    The trained model path uses the same trajectory data, so this classifier remains
+    useful as a transparent fallback and as a comparison point in benchmark runs.
     """
 
     def __init__(self, config: DynamicClassifierConfig | None = None) -> None:
@@ -371,10 +371,7 @@ class DynamicGestureClassifier:
 
         confidence = min(
             0.92,
-            0.66
-            + sustained_growth
-            + positive_step_ratio * 0.08
-            + max(0.0, 0.24 - distance) * 0.45,
+            0.66 + sustained_growth + positive_step_ratio * 0.08 + max(0.0, 0.24 - distance) * 0.45,
         )
         return GesturePrediction(
             GestureID.PULL_TOWARD,

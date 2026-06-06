@@ -1,4 +1,4 @@
-"""ROS command sender placeholder for robot integration."""
+"""ROS command sender for robot integration."""
 
 from __future__ import annotations
 

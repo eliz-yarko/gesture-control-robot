@@ -194,8 +194,7 @@ def test_dynamic_classifier_detects_subtle_pull_toward() -> None:
 
     assert prediction.gesture_id == GestureID.PULL_TOWARD
     assert (
-        prediction.metadata["sustained_growth"]
-        >= DynamicClassifierConfig().min_pull_scale_growth
+        prediction.metadata["sustained_growth"] >= DynamicClassifierConfig().min_pull_scale_growth
     )
 
 
