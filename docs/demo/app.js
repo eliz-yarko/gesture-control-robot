@@ -4,28 +4,255 @@ const $ = (id) => document.getElementById(id);
 const queryParams = new URLSearchParams(window.location.search);
 let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
 const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;
+const TRANSLATIONS = {
+  en: {
+    appTitle: "Gesture Control Console",
+    cameraFeed: "camera feed",
+    liveGestureRecognition: "Live gesture recognition",
+    start: "Start",
+    stop: "Stop",
+    reload: "Reload",
+    startVideo: "Start video",
+    videoRunning: "Video running",
+    cameraAccessNote:
+      "Camera/video access is required to recognize gestures and control the robot.",
+    selectedGesture: "Selected gesture",
+    preparedCommand: "Prepared command",
+    confidence: "Confidence",
+    motionState: "Motion state",
+    commandFlow: "command flow",
+    confirmationToRobot: "Confirmation to robot",
+    waiting: "WAITING",
+    sentState: "SENT",
+    candidate: "Candidate",
+    sentCommand: "Sent command",
+    transport: "Transport",
+    sent: "Sent",
+    lastGesture: "Last gesture",
+    confirmationRules: "confirmation rules",
+    framesBeforeSend: "Frames before send",
+    saved: "saved",
+    saving: "saving",
+    unsaved: "unsaved",
+    offline: "offline",
+    error: "error",
+    stillGesture: "Still gesture",
+    motionGesture: "Motion gesture",
+    emergencyStop: "Emergency stop",
+    apply: "Apply",
+    latency: "Latency",
+    hands: "Hands",
+    frame: "Frame",
+    stillRecognition: "Still recognition",
+    motionRecognition: "Motion recognition",
+    handPoseDiagnostics: "Hand pose diagnostics",
+    technicalHandLandmarks: "Technical hand landmarks",
+    runtime: "runtime",
+    commandLog: "Command Log",
+    time: "Time",
+    command: "Command",
+    gesture: "Gesture",
+    noCommands: "No commands emitted",
+    gestureMap: "Gesture Map",
+    gestureCount: "13 gestures",
+    frames: "frames",
+    threshold: "threshold",
+    alreadySent: "already sent",
+    lowConfidence: "low",
+    open: "open",
+    closed: "closed",
+    any: "any",
+    ok: "OK",
+    no: "NO",
+    noHandPoints: "No hand points",
+    cameraBackendUnavailable: "Backend is unavailable. Start the video backend.",
+    browserCameraUnavailable: "Browser camera API is unavailable on this page.",
+    cameraAccessRequired: "Camera/video access is required to control the robot.",
+    grantVideoPermission: "Grant video permission and try again.",
+    canvasUnavailable: "Canvas capture context is unavailable.",
+    gestureOpenPalm: "Open palm",
+    gestureFist: "Closed fist",
+    gestureThumbUp: "Thumb up",
+    gestureThumbDown: "Thumb down",
+    gestureIndexLeft: "Index left",
+    gestureIndexRight: "Index right",
+    gesturePeace: "Peace sign",
+    gestureThreeFingers: "Three fingers",
+    gesturePinky: "Pinky",
+    gestureOkSign: "OK sign",
+    gestureWaveLr: "Wave left/right",
+    gestureCircle: "Circle motion",
+    gesturePullToward: "Pull toward",
+    fingerThumb: "Thumb",
+    fingerIndex: "Index",
+    fingerMiddle: "Middle",
+    fingerRing: "Ring",
+    fingerPinky: "Pinky",
+  },
+  uk: {
+    appTitle: "Консоль керування жестами",
+    cameraFeed: "камера",
+    liveGestureRecognition: "Розпізнавання жестів наживо",
+    start: "Старт",
+    stop: "Стоп",
+    reload: "Оновити",
+    startVideo: "Запустити відео",
+    videoRunning: "Відео запущено",
+    cameraAccessNote: "Доступ до камери потрібен для розпізнавання жестів і керування роботом.",
+    selectedGesture: "Обраний жест",
+    preparedCommand: "Підготовлена команда",
+    confidence: "Впевненість",
+    motionState: "Стан руху",
+    commandFlow: "передача команди",
+    confirmationToRobot: "Підтвердження для робота",
+    waiting: "ОЧІКУВАННЯ",
+    sentState: "НАДІСЛАНО",
+    candidate: "Кандидат",
+    sentCommand: "Надіслана команда",
+    transport: "Транспорт",
+    sent: "Надіслано",
+    lastGesture: "Останній жест",
+    confirmationRules: "правила підтвердження",
+    framesBeforeSend: "Кадри перед надсиланням",
+    saved: "збережено",
+    saving: "збереження",
+    unsaved: "не збережено",
+    offline: "офлайн",
+    error: "помилка",
+    stillGesture: "Статичний жест",
+    motionGesture: "Динамічний жест",
+    emergencyStop: "Аварійна зупинка",
+    apply: "Застосувати",
+    latency: "Затримка",
+    hands: "Руки",
+    frame: "Кадр",
+    stillRecognition: "Статичне розпізнавання",
+    motionRecognition: "Динамічне розпізнавання",
+    handPoseDiagnostics: "Діагностика пози руки",
+    technicalHandLandmarks: "Технічні точки руки",
+    runtime: "виконання",
+    commandLog: "Журнал команд",
+    time: "Час",
+    command: "Команда",
+    gesture: "Жест",
+    noCommands: "Команди ще не надсилались",
+    gestureMap: "Карта жестів",
+    gestureCount: "13 жестів",
+    frames: "кадрів",
+    threshold: "поріг",
+    alreadySent: "уже надіслано",
+    lowConfidence: "низько",
+    open: "відкрито",
+    closed: "закрито",
+    any: "будь-який",
+    ok: "ТАК",
+    no: "НІ",
+    noHandPoints: "Немає точок руки",
+    cameraBackendUnavailable: "Backend недоступний. Запусти відеосервер.",
+    browserCameraUnavailable: "API камери браузера недоступний на цій сторінці.",
+    cameraAccessRequired: "Доступ до камери потрібен для керування роботом.",
+    grantVideoPermission: "Надай дозвіл на відео і спробуй ще раз.",
+    canvasUnavailable: "Контекст захоплення Canvas недоступний.",
+    gestureOpenPalm: "Відкрита долоня",
+    gestureFist: "Кулак",
+    gestureThumbUp: "Великий палець вгору",
+    gestureThumbDown: "Великий палець вниз",
+    gestureIndexLeft: "Вказівний ліворуч",
+    gestureIndexRight: "Вказівний праворуч",
+    gesturePeace: "Жест миру",
+    gestureThreeFingers: "Три пальці",
+    gesturePinky: "Мізинець",
+    gestureOkSign: "Жест OK",
+    gestureWaveLr: "Помах ліворуч/праворуч",
+    gestureCircle: "Рух по колу",
+    gesturePullToward: "Потягнути до себе",
+    fingerThumb: "Великий",
+    fingerIndex: "Вказівний",
+    fingerMiddle: "Середній",
+    fingerRing: "Безіменний",
+    fingerPinky: "Мізинець",
+  },
+};
 const GESTURE_COMMANDS = [
-  ["OPEN_PALM", "STOP"],
-  ["FIST", "FORWARD"],
-  ["THUMB_UP", "START"],
-  ["THUMB_DOWN", "EMERGENCY_STOP"],
-  ["INDEX_LEFT", "TURN_LEFT"],
-  ["INDEX_RIGHT", "TURN_RIGHT"],
-  ["PEACE", "INCREASE_SPEED"],
-  ["THREE_FINGERS", "DECREASE_SPEED"],
-  ["PINKY", "RETURN_HOME"],
-  ["OK_SIGN", "CONFIRM_ACTION"],
-  ["WAVE_LR", "MODE_TOGGLE"],
-  ["CIRCLE", "ROTATE_360"],
-  ["PULL_TOWARD", "APPROACH_OPERATOR"],
+  { gesture: "OPEN_PALM", command: "STOP", icon: "\u{1F590}\uFE0E", labelKey: "gestureOpenPalm" },
+  { gesture: "FIST", command: "FORWARD", icon: "\u270A\uFE0E", labelKey: "gestureFist" },
+  { gesture: "THUMB_UP", command: "START", icon: "\u{1F44D}\uFE0E", labelKey: "gestureThumbUp" },
+  {
+    gesture: "THUMB_DOWN",
+    command: "EMERGENCY_STOP",
+    icon: "\u{1F44E}\uFE0E",
+    labelKey: "gestureThumbDown",
+  },
+  {
+    gesture: "INDEX_LEFT",
+    command: "TURN_LEFT",
+    icon: "\u261D\uFE0E",
+    labelKey: "gestureIndexLeft",
+  },
+  {
+    gesture: "INDEX_RIGHT",
+    command: "TURN_RIGHT",
+    icon: "\u261D\uFE0E",
+    labelKey: "gestureIndexRight",
+  },
+  { gesture: "PEACE", command: "INCREASE_SPEED", icon: "\u270C\uFE0E", labelKey: "gesturePeace" },
+  {
+    gesture: "THREE_FINGERS",
+    command: "DECREASE_SPEED",
+    icon: "3",
+    labelKey: "gestureThreeFingers",
+  },
+  {
+    gesture: "PINKY",
+    command: "RETURN_HOME",
+    icon: "\u{1F91F}\uFE0E",
+    labelKey: "gesturePinky",
+  },
+  {
+    gesture: "OK_SIGN",
+    command: "CONFIRM_ACTION",
+    icon: "\u{1F44C}\uFE0E",
+    labelKey: "gestureOkSign",
+  },
+  {
+    gesture: "WAVE_LR",
+    command: "MODE_TOGGLE",
+    icon: "\u{1F590}\uFE0E",
+    labelKey: "gestureWaveLr",
+  },
+  { gesture: "CIRCLE", command: "ROTATE_360", icon: "\u25EF", labelKey: "gestureCircle" },
+  {
+    gesture: "PULL_TOWARD",
+    command: "APPROACH_OPERATOR",
+    icon: "\u21A4",
+    labelKey: "gesturePullToward",
+  },
 ];
 const FINGER_LABELS = [
-  ["thumb", "Thumb"],
-  ["index", "Index"],
-  ["middle", "Middle"],
-  ["ring", "Ring"],
-  ["pinky", "Pinky"],
+  ["thumb", "fingerThumb"],
+  ["index", "fingerIndex"],
+  ["middle", "fingerMiddle"],
+  ["ring", "fingerRing"],
+  ["pinky", "fingerPinky"],
 ];
+const REASON_LABELS = {
+  confidence_below_threshold: {
+    en: "confidence below threshold",
+    uk: "впевненість нижча за поріг",
+  },
+  repeat_suppressed: {
+    en: "already sent",
+    uk: "уже надіслано",
+  },
+  no_hand_detected: {
+    en: "no hand detected",
+    uk: "руку не виявлено",
+  },
+  unknown_prediction: {
+    en: "unknown prediction",
+    uk: "невідоме розпізнавання",
+  },
+};
 
 let browserCameraMode = false;
 let commandCache = [];
@@ -34,10 +261,49 @@ let frameTimer = null;
 let frameInFlight = false;
 let currentSource = "";
 let settingsDirty = false;
+let videoManuallyStopped = false;
+let currentLanguage = initialLanguage();
+let lastStatus = null;
 
 function text(id, value) {
   const node = $(id);
   if (node) node.textContent = value;
+}
+
+function initialLanguage() {
+  const stored = window.localStorage?.getItem("gestureConsoleLanguage");
+  if (stored === "uk" || stored === "en") return stored;
+  const requested = queryParams.get("lang");
+  if (requested === "uk" || requested === "en") return requested;
+  return navigator.language && navigator.language.toLowerCase().startsWith("uk") ? "uk" : "en";
+}
+
+function t(key) {
+  return TRANSLATIONS[currentLanguage]?.[key] || TRANSLATIONS.en[key] || key;
+}
+
+function applyStaticTranslations() {
+  document.documentElement.lang = currentLanguage;
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    const key = node.getAttribute("data-i18n");
+    if (key) node.textContent = t(key);
+  });
+  for (const button of document.querySelectorAll("[data-language]")) {
+    const language = button.getAttribute("data-language");
+    button.classList.toggle("active", language === currentLanguage);
+  }
+  setVideoStarted(document.querySelector(".video-stage")?.classList.contains("video-started"));
+}
+
+function setLanguage(language) {
+  if (language !== "uk" && language !== "en") return;
+  currentLanguage = language;
+  window.localStorage?.setItem("gestureConsoleLanguage", language);
+  applyStaticTranslations();
+  applyConfirmation(lastStatus || {});
+  renderPoseDiagnostics(lastStatus || {});
+  renderCommands(commandCache);
+  renderGestureMap(lastStatus?.selected_gesture || "UNKNOWN");
 }
 
 function fmt(value, suffix = "", digits = 2) {
@@ -49,7 +315,7 @@ function fmt(value, suffix = "", digits = 2) {
 function setStateBadge(state) {
   const badge = $("stateBadge");
   if (!badge) return;
-  badge.textContent = state;
+  badge.textContent = state === "running" ? t("sentState") : state;
   badge.className = "badge";
   if (state === "running") badge.classList.add("badge-running");
   else if (state === "error") badge.classList.add("badge-error");
@@ -60,11 +326,23 @@ function setVideoStarted(started) {
   const stage = document.querySelector(".video-stage");
   if (stage) stage.classList.toggle("video-started", Boolean(started));
   const startButton = $("startVideoButton");
-  if (startButton) startButton.textContent = started ? "Video running" : "Start video";
+  if (startButton) startButton.textContent = started ? t("videoRunning") : t("startVideo");
   const sideStartButton = $("sideStartButton");
-  if (sideStartButton) sideStartButton.textContent = started ? "Running" : "Start";
+  if (sideStartButton) {
+    sideStartButton.textContent = t("start");
+    sideStartButton.classList.toggle("is-hidden", Boolean(started));
+  }
   const stopButton = $("stopVideoButton");
   if (stopButton) stopButton.disabled = !browserCameraMode;
+  text("stopVideoButton", t("stop"));
+  text("reloadButton", t("reload"));
+  text("saveSettingsButton", t("apply"));
+}
+
+function clearVideoFrame() {
+  const stream = $("stream");
+  if (!stream) return;
+  stream.removeAttribute("src");
 }
 
 function buildUrl(path) {
@@ -73,11 +351,7 @@ function buildUrl(path) {
 }
 
 function syncApiBaseFromInput() {
-  const input = $("apiBaseInput");
-  if (!input) return;
-  apiBase = input.value.trim();
-  if (apiBase) window.localStorage.setItem("gestureApiBase", apiBase);
-  else window.localStorage.removeItem("gestureApiBase");
+  apiBase = (window.GESTURE_API_BASE || queryParams.get("api") || "").trim();
 }
 
 function escapeHtml(value) {
@@ -90,7 +364,8 @@ function escapeHtml(value) {
 }
 
 function nowTime() {
-  return new Date().toLocaleTimeString("uk-UA", {
+  const locale = currentLanguage === "uk" ? "uk-UA" : "en-US";
+  return new Date().toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -99,13 +374,16 @@ function nowTime() {
 
 function recognitionLabel(gesture, confidence, minConfidence) {
   const value = `${gesture} / ${fmt(confidence)}`;
-  if (gesture !== "UNKNOWN" && confidence < minConfidence) return `${value} low`;
+  if (gesture !== "UNKNOWN" && confidence < minConfidence) {
+    return `${value} ${t("lowConfidence")}`;
+  }
   return value;
 }
 
 function reasonLabel(reason) {
   if (!reason) return "";
-  return String(reason).replaceAll("_", " ");
+  const key = String(reason);
+  return REASON_LABELS[key]?.[currentLanguage] || key.replaceAll("_", " ");
 }
 
 function applyConfirmation(status) {
@@ -127,13 +405,17 @@ function applyConfirmation(status) {
   const bar = $("confirmationProgressBar");
   if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
   if (reason === "confidence_below_threshold") {
-    text("confirmationProgressText", `${fmt(confidence)} < ${fmt(minConfidence)} threshold`);
+    const thresholdText = `${fmt(confidence)} < ${fmt(minConfidence)} ${t("threshold")}`;
+    text("confirmationProgressText", thresholdText);
   } else if (reason === "repeat_suppressed") {
-    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames, already sent`);
+    text(
+      "confirmationProgressText",
+      `${stableFrames} / ${requiredFrames} ${t("frames")}, ${t("alreadySent")}`
+    );
   } else if (requiredFrames > 0) {
-    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames`);
+    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} ${t("frames")}`);
   } else {
-    text("confirmationProgressText", reasonLabel(reason) || "0 / 0 frames");
+    text("confirmationProgressText", reasonLabel(reason) || `0 / 0 ${t("frames")}`);
   }
 }
 
@@ -143,17 +425,17 @@ function renderPoseDiagnostics(status) {
   const directions = status.pose_directions || {};
   const node = $("fingerStates");
   if (!node) return;
-  node.innerHTML = FINGER_LABELS.map(([key, label]) => {
+  node.innerHTML = FINGER_LABELS.map(([key, labelKey]) => {
     const actual = states[key];
     const target = expected[key];
-    const actualText = actual === true ? "open" : actual === false ? "closed" : "--";
-    const targetText = target === true ? "open" : target === false ? "closed" : "any";
+    const actualText = actual === true ? t("open") : actual === false ? t("closed") : "--";
+    const targetText = target === true ? t("open") : target === false ? t("closed") : t("any");
     const matched = target === null || target === undefined || actual === target;
     return `
       <div class="finger-row">
-        <strong>${label}</strong>
+        <strong>${t(labelKey)}</strong>
         <span>${actualText} / ${targetText}</span>
-        <span class="${matched ? "match" : "mismatch"}">${matched ? "OK" : "NO"}</span>
+        <span class="${matched ? "match" : "mismatch"}">${matched ? t("ok") : t("no")}</span>
       </div>
     `;
   }).join("");
@@ -173,7 +455,7 @@ function renderLandmarks(landmarks) {
   const node = $("landmarkList");
   if (!node) return;
   if (!points.length) {
-    node.innerHTML = '<div class="empty">No hand points</div>';
+    node.innerHTML = `<div class="empty">${t("noHandPoints")}</div>`;
     return;
   }
   node.innerHTML = points.map((point) => `
@@ -187,10 +469,9 @@ function renderLandmarks(landmarks) {
 }
 
 function applyStatus(status) {
+  lastStatus = status;
   currentSource = status.source || "";
   setStateBadge(status.state);
-  text("transportBadge", status.transport);
-  text("transportText", status.transport);
   text("sourceLine", status.source);
   text("lastCommand", status.last_command);
   text("commandDisplay", status.last_command);
@@ -205,7 +486,7 @@ function applyStatus(status) {
   text("robotLastGesture", status.last_command_gesture);
   text(
     "robotTransferState",
-    status.last_command && status.last_command !== "UNKNOWN" ? "SENT" : "WAITING"
+    status.last_command && status.last_command !== "UNKNOWN" ? t("sentState") : t("waiting")
   );
   text("fps", fmt(status.fps, "", 1));
   text("latency", fmt(status.latency_ms, " ms", 1));
@@ -226,7 +507,9 @@ function applyStatus(status) {
   renderLandmarks(status.landmarks);
   renderGestureMap(status.selected_gesture);
   if (!settingsDirty) applySettings(settingsPayloadFromStatus(status));
-  if (!browserCameraMode) setVideoStarted(status.state === "running");
+  if (!browserCameraMode) {
+    setVideoStarted(status.state === "running" && !videoManuallyStopped);
+  }
 
   const errorPanel = $("errorPanel");
   if (status.error) {
@@ -239,8 +522,10 @@ function applyStatus(status) {
 }
 
 function reloadStream() {
+  videoManuallyStopped = false;
   const stream = $("stream");
   if (stream) stream.src = `${buildUrl("stream.mjpg")}?t=${Date.now()}`;
+  setVideoStarted(true);
 }
 
 async function refreshStatus() {
@@ -252,7 +537,7 @@ async function refreshStatus() {
     applyStatus(status);
   } catch (error) {
     showRuntimeError(
-      cameraAccessMessage("Backend is unavailable. Start the video backend.")
+      cameraAccessMessage(t("cameraBackendUnavailable"))
     );
   }
 }
@@ -277,7 +562,7 @@ function applySettings(settings) {
       input.value = value;
     }
   }
-  if (!settingsDirty) text("settingsStatus", "saved");
+  if (!settingsDirty) text("settingsStatus", t("saved"));
 }
 
 function readSettings() {
@@ -294,13 +579,13 @@ async function loadSettings() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applySettings(await response.json());
   } catch (error) {
-    text("settingsStatus", "offline");
+    text("settingsStatus", t("offline"));
   }
 }
 
 async function saveSettings() {
   syncApiBaseFromInput();
-  text("settingsStatus", "saving");
+  text("settingsStatus", t("saving"));
   try {
     const response = await fetch(buildUrl("api/settings"), {
       method: "POST",
@@ -311,9 +596,9 @@ async function saveSettings() {
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     settingsDirty = false;
     applySettings(payload);
-    text("settingsStatus", "saved");
+    text("settingsStatus", t("saved"));
   } catch (error) {
-    text("settingsStatus", "error");
+    text("settingsStatus", t("error"));
     showRuntimeError(error.message);
   }
 }
@@ -328,10 +613,11 @@ async function refreshCommands() {
 async function startBrowserCamera() {
   syncApiBaseFromInput();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showRuntimeError(cameraAccessMessage("Browser camera API is unavailable on this page."));
+    showRuntimeError(cameraAccessMessage(t("browserCameraUnavailable")));
     return;
   }
   try {
+    videoManuallyStopped = false;
     browserStream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 640 },
@@ -350,7 +636,7 @@ async function startBrowserCamera() {
     video.hidden = false;
     setVideoStarted(true);
     setStateBadge("camera");
-    text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
+    text("sourceLine", "browser-camera");
     frameTimer = window.setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS);
   } catch (error) {
     showRuntimeError(cameraAccessMessage(error));
@@ -358,6 +644,7 @@ async function startBrowserCamera() {
 }
 
 function stopBrowserCamera() {
+  videoManuallyStopped = true;
   browserCameraMode = false;
   if (frameTimer !== null) {
     window.clearInterval(frameTimer);
@@ -375,12 +662,13 @@ function stopBrowserCamera() {
   }
   const stage = document.querySelector(".video-stage");
   if (stage) stage.classList.remove("browser-active");
+  clearVideoFrame();
   setVideoStarted(false);
-  reloadStream();
 }
 
 async function startVideo() {
   syncApiBaseFromInput();
+  videoManuallyStopped = false;
   if (!currentSource || currentSource === "browser-camera" || browserCameraMode) {
     await startBrowserCamera();
     return;
@@ -396,6 +684,8 @@ function stopVideo() {
     stopBrowserCamera();
     return;
   }
+  videoManuallyStopped = true;
+  clearVideoFrame();
   setVideoStarted(false);
 }
 
@@ -411,7 +701,7 @@ async function captureAndSendFrame() {
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas capture context is unavailable.");
+    if (!context) throw new Error(t("canvasUnavailable"));
     context.drawImage(video, 0, 0, width, height);
     const image = canvas.toDataURL("image/jpeg", 0.72);
     const response = await fetch(buildUrl("api/frame"), {
@@ -441,7 +731,7 @@ function renderCommands(commands) {
   const body = $("commandRows");
   if (!body) return;
   if (!commands.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty">No commands emitted</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="empty">${t("noCommands")}</td></tr>`;
     return;
   }
   body.innerHTML = commands.map((entry) => `
@@ -458,10 +748,15 @@ function renderCommands(commands) {
 function renderGestureMap(activeGesture = "UNKNOWN") {
   const node = $("gestureMap");
   if (!node) return;
-  node.innerHTML = GESTURE_COMMANDS.map(([gesture, command]) => `
+  node.innerHTML = GESTURE_COMMANDS.map(({ gesture, command, icon, labelKey }) => `
     <div class="gesture-item ${gesture === activeGesture ? "active" : ""}">
-      <strong>${gesture}</strong>
-      <span>${command}</span>
+      <span class="gesture-icon" title="${escapeHtml(t(labelKey))}" aria-hidden="true">
+        ${escapeHtml(icon)}
+      </span>
+      <div class="gesture-copy">
+        <strong>${escapeHtml(gesture)}</strong>
+        <span>${escapeHtml(command)}</span>
+      </div>
     </div>
   `).join("");
 }
@@ -477,22 +772,17 @@ function cameraAccessMessage(error) {
   const detail = typeof error === "string" ? error : error?.message || "";
   if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
     return [
-      "Camera/video access is required to control the robot.",
-      "Grant video permission and try again.",
+      t("cameraAccessRequired"),
+      t("grantVideoPermission"),
     ].join(" ");
   }
   return detail
-    ? `Camera/video access is required to control the robot. ${detail}`
-    : "Camera/video access is required to control the robot.";
+    ? `${t("cameraAccessRequired")} ${detail}`
+    : t("cameraAccessRequired");
 }
 
 function bindControls() {
-  const apiInput = $("apiBaseInput");
-  if (apiInput) {
-    apiInput.value = apiBase || window.localStorage.getItem("gestureApiBase") || "";
-    apiBase = apiInput.value.trim();
-    apiInput.addEventListener("change", syncApiBaseFromInput);
-  }
+  syncApiBaseFromInput();
   const startVideoButton = $("startVideoButton");
   if (startVideoButton) startVideoButton.addEventListener("click", startVideo);
   const sideStartButton = $("sideStartButton");
@@ -501,12 +791,15 @@ function bindControls() {
   if (stopVideoButton) stopVideoButton.addEventListener("click", stopVideo);
   const reloadButton = $("reloadButton");
   if (reloadButton) reloadButton.addEventListener("click", reloadStream);
+  for (const button of document.querySelectorAll("[data-language]")) {
+    button.addEventListener("click", () => setLanguage(button.getAttribute("data-language")));
+  }
   for (const id of ["staticFramesInput", "dynamicFramesInput", "emergencyFramesInput"]) {
     const input = $(id);
     if (input) {
       input.addEventListener("input", () => {
         settingsDirty = true;
-        text("settingsStatus", "unsaved");
+        text("settingsStatus", t("unsaved"));
       });
     }
   }
@@ -515,6 +808,7 @@ function bindControls() {
 }
 
 bindControls();
+applyStaticTranslations();
 renderGestureMap();
 loadSettings();
 refreshStatus();

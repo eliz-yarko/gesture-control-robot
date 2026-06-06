@@ -6,7 +6,14 @@ from src.interpretation.command_mapper import CommandConfirmationState
 from src.pipeline import PipelineResult
 from src.recognition.gesture_pose import analyze_static_pose
 from src.recognition.hand_detector import HandDetection
-from src.web_ui import APP_JS, INDEX_HTML, STYLES_CSS, DashboardState, build_parser
+from src.web_ui import (
+    APP_JS,
+    INDEX_HTML,
+    STYLES_CSS,
+    DashboardState,
+    _annotate_frame,
+    build_parser,
+)
 
 
 def test_dashboard_state_reports_runtime_error() -> None:
@@ -64,8 +71,12 @@ def test_dashboard_state_publishes_frame_and_command_log() -> None:
     assert status["command_ready"] is True
     assert status["dynamic_state"] == "idle"
     assert status["landmarks"]
-    assert status["finger_states"]["index"] is True
-    assert status["expected_pose"]["gesture"] == "OPEN_PALM"
+    finger_states = status["finger_states"]
+    expected_pose = status["expected_pose"]
+    assert isinstance(finger_states, dict)
+    assert isinstance(expected_pose, dict)
+    assert finger_states["index"] is True
+    assert expected_pose["gesture"] == "OPEN_PALM"
     assert status["hand_count"] == 1
     assert status["fps"] == 24.8
     assert status["latency_ms"] == 32.4
@@ -87,15 +98,23 @@ def test_dashboard_frontend_omits_demo_mode_and_mentions_video_access() -> None:
     assert "confirmationProgressBar" in INDEX_HTML
     assert "fingerStates" in INDEX_HTML
     assert "landmarkList" in INDEX_HTML
+    assert "command-flow-panel" in INDEX_HTML
+    assert "collapsible-panel" in INDEX_HTML
+    assert "stateBadge" not in INDEX_HTML
+    assert "transportBadge" not in INDEX_HTML
+    assert "transportText" not in INDEX_HTML
+    assert ">mock<" not in INDEX_HTML
     assert "GESTURE_COMMANDS" in APP_JS
     assert "applyConfirmation" in APP_JS
     assert "renderPoseDiagnostics" in APP_JS
     assert "confirmation-panel" in STYLES_CSS
+    assert "gesture-icon" in STYLES_CSS
     assert "landmark-list" in STYLES_CSS
 
 
 def test_dashboard_frontend_contains_browser_camera_assets() -> None:
-    assert "apiBaseInput" in INDEX_HTML
+    assert "apiBaseInput" not in INDEX_HTML
+    assert "Backend URL" not in INDEX_HTML
     assert "startVideoButton" in INDEX_HTML
     assert "sideStartButton" in INDEX_HTML
     assert "stopVideoButton" in INDEX_HTML
@@ -106,11 +125,69 @@ def test_dashboard_frontend_contains_browser_camera_assets() -> None:
     assert "api/settings" in APP_JS
     assert "browserCameraMode" in APP_JS
     assert "payload.frame" in APP_JS
-    assert "api-input" in STYLES_CSS
+    assert "video-toolbar" in STYLES_CSS
     assert "video-start-button" in STYLES_CSS
     assert "browser-active" in STYLES_CSS
     assert "browser-video" in STYLES_CSS
     assert "browserCameraToggle" not in INDEX_HTML
+
+
+def test_dashboard_frontend_supports_ukrainian_and_english_locales() -> None:
+    assert "language-switch" in INDEX_HTML
+    assert 'data-language="uk"' in INDEX_HTML
+    assert 'data-language="en"' in INDEX_HTML
+    assert "Консоль керування жестами" in APP_JS
+    assert "Gesture Control Console" in APP_JS
+    assert "setLanguage" in APP_JS
+
+
+def test_dashboard_camera_stop_returns_to_idle_preview() -> None:
+    assert "videoManuallyStopped" in APP_JS
+    assert "clearVideoFrame" in APP_JS
+    assert ".video-stage:not(.video-started) img" in STYLES_CSS
+    assert "sideStartButton.classList.toggle(\"is-hidden\", Boolean(started))" in APP_JS
+    assert "reloadStream();" not in APP_JS.split("function stopBrowserCamera()", 1)[1].split(
+        "async function startVideo()", 1
+    )[0]
+
+
+def test_annotated_camera_frame_does_not_draw_text_overlay() -> None:
+    class _FakeFrame:
+        shape = (480, 640, 3)
+
+        def copy(self) -> _FakeFrame:
+            return self
+
+    class _FakeCv2:
+        LINE_AA = object()
+
+        def __init__(self) -> None:
+            self.text_calls = 0
+
+        def line(self, *args: object) -> None:
+            pass
+
+        def circle(self, *args: object) -> None:
+            pass
+
+        def putText(self, *args: object) -> None:
+            self.text_calls += 1
+
+    cv2 = _FakeCv2()
+    landmarks = _open_palm_landmarks()
+    result = PipelineResult(
+        frame_index=12,
+        detections=[HandDetection(landmarks=landmarks, handedness="Right", score=0.95)],
+        static_prediction=GesturePrediction(GestureID.OPEN_PALM, 0.86),
+        dynamic_prediction=GesturePrediction.unknown(),
+        selected_prediction=GesturePrediction(GestureID.OPEN_PALM, 0.86),
+        command_event=None,
+        pose_analysis=analyze_static_pose(landmarks),
+    )
+
+    _annotate_frame(cv2, _FakeFrame(), result, latency_ms=32.4, fps=24.8)
+
+    assert cv2.text_calls == 0
 
 
 def test_dashboard_state_updates_runtime_confirmation_settings() -> None:

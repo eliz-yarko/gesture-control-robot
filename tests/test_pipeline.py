@@ -64,6 +64,7 @@ def test_pipeline_suppresses_static_commands_while_dynamic_motion_is_recording()
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -86,6 +87,7 @@ def test_pipeline_emits_dynamic_command_after_segment_finishes() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -108,9 +110,38 @@ def test_pipeline_emits_dynamic_command_after_segment_finishes() -> None:
     assert sender.last_event == result.command_event
 
 
+def test_pipeline_emits_high_confidence_dynamic_command_before_motion_finishes() -> None:
+    sender = MockCommandSender()
+    offsets = _active_motion_offsets()
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            )
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections(offsets)),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+        command_sender=sender,
+    )
+
+    results = _process_frames(pipeline, len(offsets))
+    result = results[-1]
+
+    assert result.dynamic_state == "confirmed"
+    assert result.dynamic_prediction.gesture_id == GestureID.WAVE_LR
+    assert result.dynamic_prediction.metadata["early_dynamic_candidate"] is True
+    assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
+    assert result.command_event is not None
+    assert result.command_event.command == RobotCommand.MODE_TOGGLE
+    assert sender.last_event == result.command_event
+
+
 def test_pipeline_confirms_dynamic_segment_for_configured_frame_count() -> None:
     pipeline = GestureControlPipeline(
         config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=3,
@@ -189,6 +220,7 @@ def test_pipeline_emits_active_dynamic_segment_during_detection_gap() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -240,6 +272,7 @@ def test_pipeline_clears_trajectory_after_dynamic_command() -> None:
 def test_pipeline_applies_dynamic_cooldown_after_dynamic_command() -> None:
     pipeline = GestureControlPipeline(
         config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -321,6 +354,10 @@ def _process_frames(
 
 def _finished_motion_offsets() -> tuple[float, ...]:
     return (0.0, 0.03, 0.07, 0.12, 0.18, 0.24, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30)
+
+
+def _active_motion_offsets() -> tuple[float, ...]:
+    return (0.0, 0.03, 0.07, 0.12, 0.18, 0.24, 0.30, 0.36, 0.42, 0.48)
 
 
 def _moving_open_palm_detections(offsets: tuple[float, ...]) -> list[list[HandDetection]]:

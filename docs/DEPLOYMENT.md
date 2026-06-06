@@ -37,7 +37,7 @@ deployed backend, open the static page with:
 https://your-static-site.example/?api=https://your-backend.example
 ```
 
-The same URL can also be typed into the `Backend URL` field in the UI.
+The static UI keeps the API target in the `?api=` query parameter instead of showing a backend URL field.
 
 ## Browser Camera + Backend
 

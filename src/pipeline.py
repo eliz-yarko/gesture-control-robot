@@ -113,6 +113,7 @@ class GestureControlPipeline:
         segment_update = self._dynamic_segmenter.update(point)
         dynamic_prediction, dynamic_state = self._dynamic_prediction_from_segment(
             segment_update.segment,
+            candidate_segment=segment_update.candidate_segment,
             default_state=segment_update.state,
         )
         selected_prediction = _select_prediction_for_motion_state(
@@ -154,6 +155,7 @@ class GestureControlPipeline:
         segment_update = self._dynamic_segmenter.missing()
         dynamic_prediction, dynamic_state = self._dynamic_prediction_from_segment(
             segment_update.segment,
+            candidate_segment=segment_update.candidate_segment,
             default_state=segment_update.state,
         )
         selected_prediction = _select_prediction_for_motion_state(
@@ -210,6 +212,7 @@ class GestureControlPipeline:
         self,
         segment: TrajectoryBuffer | None,
         *,
+        candidate_segment: TrajectoryBuffer | None,
         default_state: str,
     ) -> tuple[GesturePrediction, str]:
         if self._dynamic_cooldown_frames > 0:
@@ -222,6 +225,10 @@ class GestureControlPipeline:
             return pending, "confirming_dynamic"
 
         if segment is None:
+            early_prediction = self._classify_early_dynamic_candidate(candidate_segment)
+            if early_prediction is not None:
+                self._hold_dynamic_prediction(early_prediction)
+                return early_prediction, "early_dynamic_candidate"
             if default_state in {"motion_started", "recording_dynamic"}:
                 return GesturePrediction.unknown("dynamic_motion_in_progress"), default_state
             return GesturePrediction.unknown(default_state), default_state
@@ -257,6 +264,40 @@ class GestureControlPipeline:
         self._pending_dynamic_frames_remaining = 0
         if clear_cooldown:
             self._dynamic_cooldown_frames = 0
+
+    def _classify_early_dynamic_candidate(
+        self,
+        candidate_segment: TrajectoryBuffer | None,
+    ) -> GesturePrediction | None:
+        if candidate_segment is None:
+            return None
+
+        min_points = max(
+            self._config.dynamic_classifier.min_dynamic_segment_points,
+            self._config.dynamic_classifier.early_dynamic_min_points,
+        )
+        if len(candidate_segment) < min_points:
+            return None
+
+        prediction = self._dynamic_classifier.classify(candidate_segment)
+        if prediction.gesture_id == GestureID.UNKNOWN:
+            return None
+
+        min_confidence = max(
+            self._config.dynamic_classifier.selection_min_confidence,
+            self._config.dynamic_classifier.early_dynamic_min_confidence,
+        )
+        if prediction.confidence < min_confidence:
+            return None
+
+        return GesturePrediction(
+            gesture_id=prediction.gesture_id,
+            confidence=prediction.confidence,
+            metadata={
+                **prediction.metadata,
+                "early_dynamic_candidate": True,
+            },
+        )
 
 
 def _select_prediction(
@@ -294,6 +335,7 @@ def _select_prediction_for_motion_state(
         "recording_dynamic",
         "cooldown",
         "confirming_dynamic",
+        "early_dynamic_candidate",
         "segment_classified",
         "segment_rejected",
     }:

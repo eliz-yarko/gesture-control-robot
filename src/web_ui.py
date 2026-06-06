@@ -931,7 +931,6 @@ def _annotate_frame(
     annotated = frame.copy()
     height, width = annotated.shape[:2]
     _draw_hand_landmarks(cv2, annotated, result, width, height)
-    _draw_overlay(cv2, annotated, result, latency_ms, fps)
     return annotated
 
 
@@ -949,50 +948,8 @@ def _draw_hand_landmarks(
     for start, end in HAND_CONNECTIONS:
         if start < len(points) and end < len(points):
             cv2.line(frame, points[start], points[end], (26, 122, 86), 2, cv2.LINE_AA)
-    for index, point in enumerate(points):
+    for point in points:
         cv2.circle(frame, point, 4, (21, 130, 199), -1, cv2.LINE_AA)
-        cv2.putText(
-            frame,
-            str(index),
-            (point[0] + 5, point[1] - 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.36,
-            (245, 247, 250),
-            1,
-            cv2.LINE_AA,
-        )
-
-
-def _draw_overlay(
-    cv2: Any,
-    frame: Any,
-    result: PipelineResult,
-    latency_ms: float,
-    fps: float,
-) -> None:
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (frame.shape[1], 112), (23, 28, 34), -1)
-    cv2.addWeighted(overlay, 0.72, frame, 0.28, 0, frame)
-
-    selected = result.selected_prediction
-    command = result.command_event.command.value if result.command_event else "PENDING"
-    confidence = f"{selected.confidence:.2f}"
-    lines = (
-        f"Gesture: {selected.gesture_id.name}  confidence={confidence}",
-        f"Command: {command}",
-        f"FPS: {fps:.1f}  latency={latency_ms:.1f} ms  frame={result.frame_index}",
-    )
-    for index, line in enumerate(lines):
-        cv2.putText(
-            frame,
-            line,
-            (18, 30 + index * 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.72,
-            (245, 247, 250),
-            2,
-            cv2.LINE_AA,
-        )
 
 
 def _command_log_entry(event: CommandEvent, frame_index: int) -> CommandLogEntry:
@@ -1107,6 +1064,8 @@ def _command_config_from_payload(
 def _confirmation_frames(value: object, fallback: int) -> int:
     if value is None:
         return fallback
+    if isinstance(value, bool) or not isinstance(value, (float, int, str)):
+        raise ValueError("Confirmation frames must be whole numbers.")
     try:
         frames = int(value)
     except (TypeError, ValueError) as exc:
@@ -1121,7 +1080,7 @@ def _timestamp() -> str:
 
 
 INDEX_HTML = """<!doctype html>
-<html lang="en">
+<html lang="uk">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1132,17 +1091,38 @@ INDEX_HTML = """<!doctype html>
   <main class="app-shell">
     <header class="topbar">
       <div class="title-block">
-        <h1>Gesture Control Console</h1>
+        <h1 data-i18n="appTitle">Gesture Control Console</h1>
         <p id="sourceLine">camera:0</p>
       </div>
-      <div class="state-strip">
-        <span id="stateBadge" class="badge badge-muted">starting</span>
-        <span id="transportBadge" class="badge">mock</span>
+      <div class="language-switch" role="group" aria-label="Language">
+        <button id="langUkButton" class="language-button" type="button" data-language="uk">
+          UA
+        </button>
+        <button id="langEnButton" class="language-button" type="button" data-language="en">
+          EN
+        </button>
       </div>
     </header>
 
     <section class="workspace">
       <section class="video-panel" aria-label="Recognition stream">
+        <div class="video-toolbar">
+          <div>
+            <span class="eyebrow" data-i18n="cameraFeed">camera feed</span>
+            <strong data-i18n="liveGestureRecognition">Live gesture recognition</strong>
+          </div>
+          <div class="control-buttons compact-actions">
+            <button id="sideStartButton" class="primary-button" type="button">
+              Start
+            </button>
+            <button id="stopVideoButton" class="secondary-button" type="button">
+              Stop
+            </button>
+            <button id="reloadButton" class="secondary-button" type="button">
+              Reload
+            </button>
+          </div>
+        </div>
         <div class="video-stage">
           <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
           <video id="browserVideo" class="browser-video" autoplay playsinline muted hidden></video>
@@ -1151,152 +1131,182 @@ INDEX_HTML = """<!doctype html>
             Start video
           </button>
         </div>
-        <p class="video-access-note">
+        <p class="video-access-note" data-i18n="cameraAccessNote">
           Camera/video access is required to recognize gestures and control the robot.
         </p>
         <div class="frame-strip">
-          <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
-          <div><span>Last command</span><strong id="lastCommand">UNKNOWN</strong></div>
-          <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
-          <div><span>Dynamic state</span><strong id="dynamicState">idle</strong></div>
+          <div>
+            <span data-i18n="selectedGesture">Selected gesture</span>
+            <strong id="selectedGesture">UNKNOWN</strong>
+          </div>
+          <div>
+            <span data-i18n="preparedCommand">Prepared command</span>
+            <strong id="lastCommand">UNKNOWN</strong>
+          </div>
+          <div>
+            <span data-i18n="confidence">Confidence</span>
+            <strong id="selectedConfidence">0.00</strong>
+          </div>
+          <div>
+            <span data-i18n="motionState">Motion state</span>
+            <strong id="dynamicState">idle</strong>
+          </div>
         </div>
       </section>
 
       <aside class="status-rail">
-        <section class="panel control-panel">
-          <span class="eyebrow">control</span>
-          <div class="control-buttons">
-            <button id="sideStartButton" class="primary-button" type="button">Start</button>
-            <button id="stopVideoButton" class="secondary-button" type="button">Stop</button>
-            <button id="reloadButton" class="secondary-button" type="button">Reload</button>
+        <section class="panel command-flow-panel confirmation-panel">
+          <div class="section-header compact-header">
+            <div>
+              <span class="eyebrow" data-i18n="commandFlow">command flow</span>
+              <h2 data-i18n="confirmationToRobot">Confirmation to robot</h2>
+            </div>
+            <span id="robotTransferState" data-i18n="waiting">WAITING</span>
           </div>
-          <label class="field-label">
-            <span>Backend URL</span>
-            <input
-              id="apiBaseInput"
-              class="api-input"
-              type="url"
-              inputmode="url"
-              placeholder="same-origin"
-              aria-label="Backend URL"
-            >
-          </label>
-        </section>
 
-        <section class="panel robot-panel">
-          <span class="eyebrow">robot transmission</span>
-          <strong id="robotTransferState">WAITING</strong>
+          <div class="flow-grid">
+            <div class="flow-node">
+              <span data-i18n="candidate">Candidate</span>
+              <strong id="candidateCommand">UNKNOWN</strong>
+              <small id="candidateGesture">UNKNOWN / 0.00</small>
+            </div>
+            <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+            <div class="flow-node confirmed-node">
+              <span data-i18n="sentCommand">Sent command</span>
+              <strong id="commandDisplay">UNKNOWN</strong>
+              <small id="lastCommandMeta">UNKNOWN / 0.00</small>
+            </div>
+          </div>
+
+          <div class="progress-block">
+            <div class="progress-track" aria-hidden="true">
+              <span id="confirmationProgressBar"></span>
+            </div>
+            <span id="confirmationProgressText">0 / 0 frames</span>
+          </div>
+
           <div class="robot-grid">
-            <div><span>Transport</span><b id="transportText">mock</b></div>
-            <div><span>Sent</span><b id="robotCommandCount">0</b></div>
-            <div><span>Last gesture</span><b id="robotLastGesture">UNKNOWN</b></div>
+            <div><span data-i18n="sent">Sent</span><b id="robotCommandCount">0</b></div>
+            <div>
+              <span data-i18n="lastGesture">Last gesture</span>
+              <b id="robotLastGesture">UNKNOWN</b>
+            </div>
           </div>
-        </section>
-
-        <section class="panel command-panel">
-          <span class="eyebrow">last confirmed command</span>
-          <strong id="commandDisplay">UNKNOWN</strong>
-          <span id="lastCommandMeta">UNKNOWN / 0.00</span>
-        </section>
-
-        <section class="panel confirmation-panel">
-          <span class="eyebrow">confirmation</span>
-          <strong id="candidateCommand">UNKNOWN</strong>
-          <span id="candidateGesture">UNKNOWN / 0.00</span>
-          <div class="progress-track" aria-hidden="true">
-            <span id="confirmationProgressBar"></span>
-          </div>
-          <span id="confirmationProgressText">0 / 0 frames</span>
         </section>
 
         <section class="panel settings-panel">
           <div class="section-header compact-header">
-            <h2>Confirmation frames</h2>
-            <span id="settingsStatus">saved</span>
+            <div>
+              <span class="eyebrow" data-i18n="confirmationRules">confirmation rules</span>
+              <h2 data-i18n="framesBeforeSend">Frames before send</h2>
+            </div>
+            <span id="settingsStatus" data-i18n="saved">saved</span>
           </div>
           <div class="settings-grid">
             <label>
-              <span>Static</span>
+              <span data-i18n="stillGesture">Still gesture</span>
               <input id="staticFramesInput" type="number" min="1" max="12" step="1" value="5">
             </label>
             <label>
-              <span>Dynamic</span>
+              <span data-i18n="motionGesture">Motion gesture</span>
               <input id="dynamicFramesInput" type="number" min="1" max="12" step="1" value="1">
             </label>
             <label>
-              <span>Emergency</span>
+              <span data-i18n="emergencyStop">Emergency stop</span>
               <input id="emergencyFramesInput" type="number" min="1" max="12" step="1" value="3">
             </label>
           </div>
-          <button id="saveSettingsButton" class="primary-button full-button" type="button">
+          <button
+            id="saveSettingsButton"
+            class="primary-button full-button"
+            type="button"
+            data-i18n="apply"
+          >
             Apply
           </button>
         </section>
 
         <section class="metrics-grid">
           <div class="metric"><span>FPS</span><strong id="fps">0.0</strong></div>
-          <div class="metric"><span>Latency</span><strong id="latency">0 ms</strong></div>
-          <div class="metric"><span>Hands</span><strong id="handCount">0</strong></div>
-          <div class="metric"><span>Frame</span><strong id="frameIndex">0</strong></div>
+          <div class="metric">
+            <span data-i18n="latency">Latency</span>
+            <strong id="latency">0 ms</strong>
+          </div>
+          <div class="metric">
+            <span data-i18n="hands">Hands</span>
+            <strong id="handCount">0</strong>
+          </div>
+          <div class="metric">
+            <span data-i18n="frame">Frame</span>
+            <strong id="frameIndex">0</strong>
+          </div>
         </section>
 
         <section class="panel split-panel">
-          <div><span>Static</span><strong id="staticGesture">UNKNOWN</strong></div>
-          <div><span>Dynamic</span><strong id="dynamicGesture">UNKNOWN</strong></div>
+          <div>
+            <span data-i18n="stillRecognition">Still recognition</span>
+            <strong id="staticGesture">UNKNOWN</strong>
+          </div>
+          <div>
+            <span data-i18n="motionRecognition">Motion recognition</span>
+            <strong id="dynamicGesture">UNKNOWN</strong>
+          </div>
         </section>
 
-        <section class="panel pose-panel">
-          <div class="section-header compact-header">
-            <h2>Hand pose</h2>
-            <span id="poseDirection">--</span>
-          </div>
+        <details class="panel pose-panel">
+          <summary>
+            <span data-i18n="handPoseDiagnostics">Hand pose diagnostics</span>
+            <b id="poseDirection">--</b>
+          </summary>
           <div id="fingerStates" class="finger-states"></div>
-        </section>
+        </details>
 
-        <section class="panel landmarks-panel">
-          <div class="section-header compact-header">
-            <h2>Landmark points</h2>
-            <span id="landmarkCount">0 / 21</span>
-          </div>
+        <details class="panel landmarks-panel">
+          <summary>
+            <span data-i18n="technicalHandLandmarks">Technical hand landmarks</span>
+            <b id="landmarkCount">0 / 21</b>
+          </summary>
           <div id="landmarkList" class="landmark-list"></div>
-        </section>
+        </details>
 
         <section class="panel error-panel" id="errorPanel" hidden>
-          <span class="eyebrow">runtime</span>
+          <span class="eyebrow" data-i18n="runtime">runtime</span>
           <strong id="errorText"></strong>
         </section>
       </aside>
     </section>
 
     <section class="lower-grid">
-      <section class="log-band">
-        <div class="section-header">
-          <h2>Command Log</h2>
-          <span id="updatedAt">--:--:--</span>
+      <details class="log-band collapsible-panel">
+        <summary>
+          <span data-i18n="commandLog">Command Log</span>
+          <b id="updatedAt">--:--:--</b>
+        </summary>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="time">Time</th>
+                <th data-i18n="command">Command</th>
+                <th data-i18n="gesture">Gesture</th>
+                <th data-i18n="confidence">Confidence</th>
+                <th data-i18n="frame">Frame</th>
+              </tr>
+            </thead>
+            <tbody id="commandRows">
+              <tr><td colspan="5" class="empty" data-i18n="noCommands">No commands emitted</td></tr>
+            </tbody>
+          </table>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Command</th>
-              <th>Gesture</th>
-              <th>Confidence</th>
-              <th>Frame</th>
-            </tr>
-          </thead>
-          <tbody id="commandRows">
-            <tr><td colspan="5" class="empty">No commands emitted</td></tr>
-          </tbody>
-        </table>
-      </section>
+      </details>
 
-      <section class="map-band">
-        <div class="section-header">
-          <h2>Gesture Map</h2>
-          <span>13 gestures</span>
-        </div>
+      <details class="map-band collapsible-panel" open>
+        <summary>
+          <span data-i18n="gestureMap">Gesture Map</span>
+          <b data-i18n="gestureCount">13 gestures</b>
+        </summary>
         <div id="gestureMap" class="gesture-map"></div>
-      </section>
+      </details>
     </section>
   </main>
   <script src="app.js"></script>
@@ -1319,7 +1329,6 @@ STYLES_CSS = """
   --blue: #1e6ea8;
   --amber: #a96603;
   --red: #b33a3a;
-  --violet: #7352a1;
   --shadow: 0 14px 34px rgba(31, 41, 55, 0.08);
 }
 
@@ -1340,7 +1349,7 @@ body {
 }
 
 .app-shell {
-  width: min(1320px, 100%);
+  width: min(1360px, 100%);
   margin: 0 auto;
   padding: 18px 20px 24px;
 }
@@ -1353,7 +1362,9 @@ body {
   padding: 8px 2px 18px;
 }
 
-h1, h2, p {
+h1,
+h2,
+p {
   margin: 0;
 }
 
@@ -1363,10 +1374,44 @@ h1 {
   letter-spacing: 0;
 }
 
+h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
 .topbar p {
   margin-top: 4px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.language-button {
+  min-width: 42px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.language-button.active {
+  background: var(--teal);
+  color: #ffffff;
 }
 
 .state-strip {
@@ -1376,46 +1421,34 @@ h1 {
   flex-wrap: wrap;
 }
 
-.button-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.api-input {
-  width: min(260px, 100%);
+.badge {
+  min-width: 88px;
   min-height: 32px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-}
-
-.api-input:focus {
-  border-color: rgba(30, 110, 168, 0.55);
-  outline: 2px solid rgba(30, 110, 168, 0.12);
-}
-
-.icon-button {
-  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
   color: var(--graphite);
-  font: inherit;
   font-size: 13px;
-  font-weight: 750;
-  cursor: pointer;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
-.icon-button:hover,
-.icon-button.active {
-  border-color: rgba(30, 110, 168, 0.45);
-  color: var(--blue);
+.badge-running {
+  border-color: rgba(19, 122, 99, 0.35);
+  color: var(--teal);
+}
+
+.badge-error {
+  border-color: rgba(179, 58, 58, 0.35);
+  color: var(--red);
+}
+
+.badge-muted {
+  color: var(--muted);
 }
 
 .primary-button,
@@ -1450,44 +1483,25 @@ h1 {
   color: var(--blue);
 }
 
-.badge {
-  min-width: 88px;
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--graphite);
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-.badge-running {
-  border-color: rgba(19, 122, 99, 0.35);
-  color: var(--teal);
-}
-
-.badge-error {
-  border-color: rgba(179, 58, 58, 0.35);
-  color: var(--red);
-}
-
-.badge-muted {
-  color: var(--muted);
+.is-hidden {
+  display: none !important;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(520px, 860px) minmax(340px, 390px);
+  grid-template-columns: minmax(540px, 890px) minmax(360px, 410px);
   gap: 18px;
   justify-content: center;
   align-items: start;
 }
 
+.panel,
+.metric,
 .video-panel,
 .log-band,
 .map-band {
@@ -1497,12 +1511,36 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.video-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.video-toolbar strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.control-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(82px, 1fr));
+  gap: 8px;
+}
+
+.compact-actions {
+  flex: 0 0 min(330px, 48%);
+}
+
 .video-stage {
   position: relative;
   aspect-ratio: 4 / 3;
   min-height: 0;
   background: #11161b;
-  border-radius: 8px;
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -1514,6 +1552,11 @@ h1 {
   object-fit: contain;
   display: block;
   background: #11161b;
+  transition: opacity 120ms ease;
+}
+
+.video-stage:not(.video-started) img {
+  opacity: 0;
 }
 
 .video-stage.browser-active .browser-video {
@@ -1584,11 +1627,17 @@ h1 {
   border-right: 0;
 }
 
-.frame-strip span {
+.frame-strip span,
+.metric span,
+.split-panel span,
+.flow-node span,
+.robot-grid span,
+.settings-grid span,
+.eyebrow {
   display: block;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: 760;
   text-transform: uppercase;
 }
 
@@ -1605,118 +1654,83 @@ h1 {
   align-content: start;
 }
 
-.panel,
-.metric {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-}
-
-.control-panel,
-.robot-panel,
+.command-flow-panel,
 .settings-panel {
   padding: 14px;
 }
 
-.control-buttons {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
+.command-flow-panel {
+  border-top: 4px solid var(--teal);
 }
 
-.field-label {
-  display: grid;
-  gap: 6px;
-  margin-top: 12px;
+.compact-header {
+  margin-bottom: 12px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.section-header > span,
+.section-header > b {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 760;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 700;
 }
 
-.field-label .api-input {
-  width: 100%;
-  text-transform: none;
-  font-weight: 500;
+.flow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
 }
 
-.robot-panel {
-  border-top: 4px solid var(--blue);
+.flow-node {
+  min-width: 0;
+  min-height: 104px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
 }
 
-.robot-panel > strong {
+.flow-node strong {
   display: block;
   margin-top: 8px;
   font-size: 22px;
   line-height: 1.15;
-}
-
-.robot-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 7px;
-  margin-top: 12px;
-}
-
-.robot-grid div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-soft);
-}
-
-.robot-grid span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 760;
-  text-transform: uppercase;
-}
-
-.robot-grid b {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-  text-align: right;
-}
-
-.command-panel {
-  padding: 18px;
-  border-top: 4px solid var(--teal);
-}
-
-.command-panel strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 30px;
-  line-height: 1.1;
   overflow-wrap: anywhere;
 }
 
-.command-panel span:last-child {
+.flow-node small {
   display: block;
   margin-top: 8px;
   color: var(--muted);
   font-size: 13px;
-}
-
-.confirmation-panel {
-  padding: 16px;
-}
-
-.confirmation-panel strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 23px;
-  line-height: 1.15;
   overflow-wrap: anywhere;
 }
 
-.confirmation-panel > span:not(.eyebrow) {
+.confirmed-node {
+  border-color: rgba(15, 127, 104, 0.35);
+  background: #f1faf7;
+}
+
+.flow-arrow {
+  align-self: center;
+  justify-self: center;
+  color: var(--blue);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.progress-block {
+  margin-top: 12px;
+}
+
+.progress-block > span {
   display: block;
   margin-top: 8px;
   color: var(--muted);
@@ -1727,7 +1741,6 @@ h1 {
 .progress-track {
   width: 100%;
   height: 8px;
-  margin-top: 12px;
   overflow: hidden;
   border-radius: 999px;
   background: #dfe7ee;
@@ -1750,6 +1763,31 @@ h1 {
   background: var(--amber);
 }
 
+.robot-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.robot-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.robot-grid b {
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1760,13 +1798,6 @@ h1 {
   display: grid;
   gap: 6px;
   min-width: 0;
-}
-
-.settings-grid span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 760;
-  text-transform: uppercase;
 }
 
 .settings-grid input {
@@ -1786,13 +1817,6 @@ h1 {
   margin-top: 12px;
 }
 
-.eyebrow {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1802,15 +1826,6 @@ h1 {
 .metric {
   min-height: 82px;
   padding: 12px;
-}
-
-.metric span,
-.split-panel span {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
 }
 
 .metric strong {
@@ -1840,23 +1855,63 @@ h1 {
   overflow-wrap: anywhere;
 }
 
-.pose-panel,
-.landmarks-panel {
-  padding: 14px;
+details.panel,
+details.log-band,
+details.map-band {
+  overflow: hidden;
 }
 
-.compact-header {
-  margin-bottom: 10px;
+summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
 }
 
-.compact-header h2 {
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::after {
+  content: "+";
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--blue);
+  font-weight: 800;
+}
+
+details[open] > summary::after {
+  content: "-";
+}
+
+summary span {
   font-size: 15px;
+  font-weight: 800;
+}
+
+summary b {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .finger-states {
   display: grid;
   grid-template-columns: 1fr;
   gap: 7px;
+  padding: 0 14px 14px;
 }
 
 .finger-row {
@@ -1893,6 +1948,7 @@ h1 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+  padding: 0 14px 14px;
 }
 
 .landmark-point {
@@ -1931,27 +1987,13 @@ h1 {
   align-items: start;
 }
 
-.log-band,
-.map-band {
-  padding: 16px;
+.collapsible-panel > summary {
+  padding: 16px 20px;
+}
+
+.table-wrap {
   overflow-x: auto;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-h2 {
-  font-size: 18px;
-}
-
-.section-header span {
-  color: var(--muted);
-  font-size: 13px;
+  padding: 0 20px 18px;
 }
 
 table {
@@ -1981,17 +2023,18 @@ th {
 
 .gesture-map {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+  padding: 0 20px 20px;
 }
 
 .gesture-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
   align-items: center;
-  min-height: 46px;
-  padding: 9px 10px;
+  min-height: 64px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-soft);
@@ -2002,19 +2045,39 @@ th {
   background: #eef8f5;
 }
 
-.gesture-item strong,
-.gesture-item span {
+.gesture-icon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(30, 110, 168, 0.22);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--graphite);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.gesture-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.gesture-copy strong,
+.gesture-copy span {
   overflow-wrap: anywhere;
 }
 
-.gesture-item strong {
+.gesture-copy strong {
   font-size: 13px;
 }
 
-.gesture-item span {
+.gesture-copy span {
   color: var(--muted);
   font-size: 12px;
-  text-align: right;
 }
 
 @media (max-width: 980px) {
@@ -2032,33 +2095,37 @@ th {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 700px) {
   .app-shell {
     padding: 12px;
   }
 
-  .topbar {
+  .topbar,
+  .video-toolbar {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .api-input {
-    width: 100%;
   }
 
   h1 {
     font-size: 24px;
   }
 
-  .metrics-grid {
+  .compact-actions,
+  .control-buttons {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .flow-grid {
     grid-template-columns: 1fr;
   }
 
-  .video-stage,
-  .browser-video {
-    aspect-ratio: 4 / 3;
+  .flow-arrow {
+    transform: rotate(90deg);
   }
 
+  .settings-grid,
+  .metrics-grid,
   .frame-strip {
     grid-template-columns: 1fr;
   }
@@ -2071,6 +2138,11 @@ th {
   .frame-strip div:last-child {
     border-bottom: 0;
   }
+
+  .video-stage,
+  .browser-video {
+    aspect-ratio: 4 / 3;
+  }
 }
 """
 
@@ -2081,28 +2153,255 @@ const $ = (id) => document.getElementById(id);
 const queryParams = new URLSearchParams(window.location.search);
 let apiBase = window.GESTURE_API_BASE || queryParams.get("api") || "";
 const BROWSER_CAMERA_FRAME_INTERVAL_MS = 50;
+const TRANSLATIONS = {
+  en: {
+    appTitle: "Gesture Control Console",
+    cameraFeed: "camera feed",
+    liveGestureRecognition: "Live gesture recognition",
+    start: "Start",
+    stop: "Stop",
+    reload: "Reload",
+    startVideo: "Start video",
+    videoRunning: "Video running",
+    cameraAccessNote:
+      "Camera/video access is required to recognize gestures and control the robot.",
+    selectedGesture: "Selected gesture",
+    preparedCommand: "Prepared command",
+    confidence: "Confidence",
+    motionState: "Motion state",
+    commandFlow: "command flow",
+    confirmationToRobot: "Confirmation to robot",
+    waiting: "WAITING",
+    sentState: "SENT",
+    candidate: "Candidate",
+    sentCommand: "Sent command",
+    transport: "Transport",
+    sent: "Sent",
+    lastGesture: "Last gesture",
+    confirmationRules: "confirmation rules",
+    framesBeforeSend: "Frames before send",
+    saved: "saved",
+    saving: "saving",
+    unsaved: "unsaved",
+    offline: "offline",
+    error: "error",
+    stillGesture: "Still gesture",
+    motionGesture: "Motion gesture",
+    emergencyStop: "Emergency stop",
+    apply: "Apply",
+    latency: "Latency",
+    hands: "Hands",
+    frame: "Frame",
+    stillRecognition: "Still recognition",
+    motionRecognition: "Motion recognition",
+    handPoseDiagnostics: "Hand pose diagnostics",
+    technicalHandLandmarks: "Technical hand landmarks",
+    runtime: "runtime",
+    commandLog: "Command Log",
+    time: "Time",
+    command: "Command",
+    gesture: "Gesture",
+    noCommands: "No commands emitted",
+    gestureMap: "Gesture Map",
+    gestureCount: "13 gestures",
+    frames: "frames",
+    threshold: "threshold",
+    alreadySent: "already sent",
+    lowConfidence: "low",
+    open: "open",
+    closed: "closed",
+    any: "any",
+    ok: "OK",
+    no: "NO",
+    noHandPoints: "No hand points",
+    cameraBackendUnavailable: "Backend is unavailable. Start the video backend.",
+    browserCameraUnavailable: "Browser camera API is unavailable on this page.",
+    cameraAccessRequired: "Camera/video access is required to control the robot.",
+    grantVideoPermission: "Grant video permission and try again.",
+    canvasUnavailable: "Canvas capture context is unavailable.",
+    gestureOpenPalm: "Open palm",
+    gestureFist: "Closed fist",
+    gestureThumbUp: "Thumb up",
+    gestureThumbDown: "Thumb down",
+    gestureIndexLeft: "Index left",
+    gestureIndexRight: "Index right",
+    gesturePeace: "Peace sign",
+    gestureThreeFingers: "Three fingers",
+    gesturePinky: "Pinky",
+    gestureOkSign: "OK sign",
+    gestureWaveLr: "Wave left/right",
+    gestureCircle: "Circle motion",
+    gesturePullToward: "Pull toward",
+    fingerThumb: "Thumb",
+    fingerIndex: "Index",
+    fingerMiddle: "Middle",
+    fingerRing: "Ring",
+    fingerPinky: "Pinky",
+  },
+  uk: {
+    appTitle: "Консоль керування жестами",
+    cameraFeed: "камера",
+    liveGestureRecognition: "Розпізнавання жестів наживо",
+    start: "Старт",
+    stop: "Стоп",
+    reload: "Оновити",
+    startVideo: "Запустити відео",
+    videoRunning: "Відео запущено",
+    cameraAccessNote: "Доступ до камери потрібен для розпізнавання жестів і керування роботом.",
+    selectedGesture: "Обраний жест",
+    preparedCommand: "Підготовлена команда",
+    confidence: "Впевненість",
+    motionState: "Стан руху",
+    commandFlow: "передача команди",
+    confirmationToRobot: "Підтвердження для робота",
+    waiting: "ОЧІКУВАННЯ",
+    sentState: "НАДІСЛАНО",
+    candidate: "Кандидат",
+    sentCommand: "Надіслана команда",
+    transport: "Транспорт",
+    sent: "Надіслано",
+    lastGesture: "Останній жест",
+    confirmationRules: "правила підтвердження",
+    framesBeforeSend: "Кадри перед надсиланням",
+    saved: "збережено",
+    saving: "збереження",
+    unsaved: "не збережено",
+    offline: "офлайн",
+    error: "помилка",
+    stillGesture: "Статичний жест",
+    motionGesture: "Динамічний жест",
+    emergencyStop: "Аварійна зупинка",
+    apply: "Застосувати",
+    latency: "Затримка",
+    hands: "Руки",
+    frame: "Кадр",
+    stillRecognition: "Статичне розпізнавання",
+    motionRecognition: "Динамічне розпізнавання",
+    handPoseDiagnostics: "Діагностика пози руки",
+    technicalHandLandmarks: "Технічні точки руки",
+    runtime: "виконання",
+    commandLog: "Журнал команд",
+    time: "Час",
+    command: "Команда",
+    gesture: "Жест",
+    noCommands: "Команди ще не надсилались",
+    gestureMap: "Карта жестів",
+    gestureCount: "13 жестів",
+    frames: "кадрів",
+    threshold: "поріг",
+    alreadySent: "уже надіслано",
+    lowConfidence: "низько",
+    open: "відкрито",
+    closed: "закрито",
+    any: "будь-який",
+    ok: "ТАК",
+    no: "НІ",
+    noHandPoints: "Немає точок руки",
+    cameraBackendUnavailable: "Backend недоступний. Запусти відеосервер.",
+    browserCameraUnavailable: "API камери браузера недоступний на цій сторінці.",
+    cameraAccessRequired: "Доступ до камери потрібен для керування роботом.",
+    grantVideoPermission: "Надай дозвіл на відео і спробуй ще раз.",
+    canvasUnavailable: "Контекст захоплення Canvas недоступний.",
+    gestureOpenPalm: "Відкрита долоня",
+    gestureFist: "Кулак",
+    gestureThumbUp: "Великий палець вгору",
+    gestureThumbDown: "Великий палець вниз",
+    gestureIndexLeft: "Вказівний ліворуч",
+    gestureIndexRight: "Вказівний праворуч",
+    gesturePeace: "Жест миру",
+    gestureThreeFingers: "Три пальці",
+    gesturePinky: "Мізинець",
+    gestureOkSign: "Жест OK",
+    gestureWaveLr: "Помах ліворуч/праворуч",
+    gestureCircle: "Рух по колу",
+    gesturePullToward: "Потягнути до себе",
+    fingerThumb: "Великий",
+    fingerIndex: "Вказівний",
+    fingerMiddle: "Середній",
+    fingerRing: "Безіменний",
+    fingerPinky: "Мізинець",
+  },
+};
 const GESTURE_COMMANDS = [
-  ["OPEN_PALM", "STOP"],
-  ["FIST", "FORWARD"],
-  ["THUMB_UP", "START"],
-  ["THUMB_DOWN", "EMERGENCY_STOP"],
-  ["INDEX_LEFT", "TURN_LEFT"],
-  ["INDEX_RIGHT", "TURN_RIGHT"],
-  ["PEACE", "INCREASE_SPEED"],
-  ["THREE_FINGERS", "DECREASE_SPEED"],
-  ["PINKY", "RETURN_HOME"],
-  ["OK_SIGN", "CONFIRM_ACTION"],
-  ["WAVE_LR", "MODE_TOGGLE"],
-  ["CIRCLE", "ROTATE_360"],
-  ["PULL_TOWARD", "APPROACH_OPERATOR"],
+  { gesture: "OPEN_PALM", command: "STOP", icon: "\\u{1F590}\\uFE0E", labelKey: "gestureOpenPalm" },
+  { gesture: "FIST", command: "FORWARD", icon: "\\u270A\\uFE0E", labelKey: "gestureFist" },
+  { gesture: "THUMB_UP", command: "START", icon: "\\u{1F44D}\\uFE0E", labelKey: "gestureThumbUp" },
+  {
+    gesture: "THUMB_DOWN",
+    command: "EMERGENCY_STOP",
+    icon: "\\u{1F44E}\\uFE0E",
+    labelKey: "gestureThumbDown",
+  },
+  {
+    gesture: "INDEX_LEFT",
+    command: "TURN_LEFT",
+    icon: "\\u261D\\uFE0E",
+    labelKey: "gestureIndexLeft",
+  },
+  {
+    gesture: "INDEX_RIGHT",
+    command: "TURN_RIGHT",
+    icon: "\\u261D\\uFE0E",
+    labelKey: "gestureIndexRight",
+  },
+  { gesture: "PEACE", command: "INCREASE_SPEED", icon: "\\u270C\\uFE0E", labelKey: "gesturePeace" },
+  {
+    gesture: "THREE_FINGERS",
+    command: "DECREASE_SPEED",
+    icon: "3",
+    labelKey: "gestureThreeFingers",
+  },
+  {
+    gesture: "PINKY",
+    command: "RETURN_HOME",
+    icon: "\\u{1F91F}\\uFE0E",
+    labelKey: "gesturePinky",
+  },
+  {
+    gesture: "OK_SIGN",
+    command: "CONFIRM_ACTION",
+    icon: "\\u{1F44C}\\uFE0E",
+    labelKey: "gestureOkSign",
+  },
+  {
+    gesture: "WAVE_LR",
+    command: "MODE_TOGGLE",
+    icon: "\\u{1F590}\\uFE0E",
+    labelKey: "gestureWaveLr",
+  },
+  { gesture: "CIRCLE", command: "ROTATE_360", icon: "\\u25EF", labelKey: "gestureCircle" },
+  {
+    gesture: "PULL_TOWARD",
+    command: "APPROACH_OPERATOR",
+    icon: "\\u21A4",
+    labelKey: "gesturePullToward",
+  },
 ];
 const FINGER_LABELS = [
-  ["thumb", "Thumb"],
-  ["index", "Index"],
-  ["middle", "Middle"],
-  ["ring", "Ring"],
-  ["pinky", "Pinky"],
+  ["thumb", "fingerThumb"],
+  ["index", "fingerIndex"],
+  ["middle", "fingerMiddle"],
+  ["ring", "fingerRing"],
+  ["pinky", "fingerPinky"],
 ];
+const REASON_LABELS = {
+  confidence_below_threshold: {
+    en: "confidence below threshold",
+    uk: "впевненість нижча за поріг",
+  },
+  repeat_suppressed: {
+    en: "already sent",
+    uk: "уже надіслано",
+  },
+  no_hand_detected: {
+    en: "no hand detected",
+    uk: "руку не виявлено",
+  },
+  unknown_prediction: {
+    en: "unknown prediction",
+    uk: "невідоме розпізнавання",
+  },
+};
 
 let browserCameraMode = false;
 let commandCache = [];
@@ -2111,10 +2410,49 @@ let frameTimer = null;
 let frameInFlight = false;
 let currentSource = "";
 let settingsDirty = false;
+let videoManuallyStopped = false;
+let currentLanguage = initialLanguage();
+let lastStatus = null;
 
 function text(id, value) {
   const node = $(id);
   if (node) node.textContent = value;
+}
+
+function initialLanguage() {
+  const stored = window.localStorage?.getItem("gestureConsoleLanguage");
+  if (stored === "uk" || stored === "en") return stored;
+  const requested = queryParams.get("lang");
+  if (requested === "uk" || requested === "en") return requested;
+  return navigator.language && navigator.language.toLowerCase().startsWith("uk") ? "uk" : "en";
+}
+
+function t(key) {
+  return TRANSLATIONS[currentLanguage]?.[key] || TRANSLATIONS.en[key] || key;
+}
+
+function applyStaticTranslations() {
+  document.documentElement.lang = currentLanguage;
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    const key = node.getAttribute("data-i18n");
+    if (key) node.textContent = t(key);
+  });
+  for (const button of document.querySelectorAll("[data-language]")) {
+    const language = button.getAttribute("data-language");
+    button.classList.toggle("active", language === currentLanguage);
+  }
+  setVideoStarted(document.querySelector(".video-stage")?.classList.contains("video-started"));
+}
+
+function setLanguage(language) {
+  if (language !== "uk" && language !== "en") return;
+  currentLanguage = language;
+  window.localStorage?.setItem("gestureConsoleLanguage", language);
+  applyStaticTranslations();
+  applyConfirmation(lastStatus || {});
+  renderPoseDiagnostics(lastStatus || {});
+  renderCommands(commandCache);
+  renderGestureMap(lastStatus?.selected_gesture || "UNKNOWN");
 }
 
 function fmt(value, suffix = "", digits = 2) {
@@ -2126,7 +2464,7 @@ function fmt(value, suffix = "", digits = 2) {
 function setStateBadge(state) {
   const badge = $("stateBadge");
   if (!badge) return;
-  badge.textContent = state;
+  badge.textContent = state === "running" ? t("sentState") : state;
   badge.className = "badge";
   if (state === "running") badge.classList.add("badge-running");
   else if (state === "error") badge.classList.add("badge-error");
@@ -2137,11 +2475,23 @@ function setVideoStarted(started) {
   const stage = document.querySelector(".video-stage");
   if (stage) stage.classList.toggle("video-started", Boolean(started));
   const startButton = $("startVideoButton");
-  if (startButton) startButton.textContent = started ? "Video running" : "Start video";
+  if (startButton) startButton.textContent = started ? t("videoRunning") : t("startVideo");
   const sideStartButton = $("sideStartButton");
-  if (sideStartButton) sideStartButton.textContent = started ? "Running" : "Start";
+  if (sideStartButton) {
+    sideStartButton.textContent = t("start");
+    sideStartButton.classList.toggle("is-hidden", Boolean(started));
+  }
   const stopButton = $("stopVideoButton");
   if (stopButton) stopButton.disabled = !browserCameraMode;
+  text("stopVideoButton", t("stop"));
+  text("reloadButton", t("reload"));
+  text("saveSettingsButton", t("apply"));
+}
+
+function clearVideoFrame() {
+  const stream = $("stream");
+  if (!stream) return;
+  stream.removeAttribute("src");
 }
 
 function buildUrl(path) {
@@ -2150,11 +2500,7 @@ function buildUrl(path) {
 }
 
 function syncApiBaseFromInput() {
-  const input = $("apiBaseInput");
-  if (!input) return;
-  apiBase = input.value.trim();
-  if (apiBase) window.localStorage.setItem("gestureApiBase", apiBase);
-  else window.localStorage.removeItem("gestureApiBase");
+  apiBase = (window.GESTURE_API_BASE || queryParams.get("api") || "").trim();
 }
 
 function escapeHtml(value) {
@@ -2167,7 +2513,8 @@ function escapeHtml(value) {
 }
 
 function nowTime() {
-  return new Date().toLocaleTimeString("uk-UA", {
+  const locale = currentLanguage === "uk" ? "uk-UA" : "en-US";
+  return new Date().toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -2176,13 +2523,16 @@ function nowTime() {
 
 function recognitionLabel(gesture, confidence, minConfidence) {
   const value = `${gesture} / ${fmt(confidence)}`;
-  if (gesture !== "UNKNOWN" && confidence < minConfidence) return `${value} low`;
+  if (gesture !== "UNKNOWN" && confidence < minConfidence) {
+    return `${value} ${t("lowConfidence")}`;
+  }
   return value;
 }
 
 function reasonLabel(reason) {
   if (!reason) return "";
-  return String(reason).replaceAll("_", " ");
+  const key = String(reason);
+  return REASON_LABELS[key]?.[currentLanguage] || key.replaceAll("_", " ");
 }
 
 function applyConfirmation(status) {
@@ -2204,13 +2554,17 @@ function applyConfirmation(status) {
   const bar = $("confirmationProgressBar");
   if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
   if (reason === "confidence_below_threshold") {
-    text("confirmationProgressText", `${fmt(confidence)} < ${fmt(minConfidence)} threshold`);
+    const thresholdText = `${fmt(confidence)} < ${fmt(minConfidence)} ${t("threshold")}`;
+    text("confirmationProgressText", thresholdText);
   } else if (reason === "repeat_suppressed") {
-    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames, already sent`);
+    text(
+      "confirmationProgressText",
+      `${stableFrames} / ${requiredFrames} ${t("frames")}, ${t("alreadySent")}`
+    );
   } else if (requiredFrames > 0) {
-    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} frames`);
+    text("confirmationProgressText", `${stableFrames} / ${requiredFrames} ${t("frames")}`);
   } else {
-    text("confirmationProgressText", reasonLabel(reason) || "0 / 0 frames");
+    text("confirmationProgressText", reasonLabel(reason) || `0 / 0 ${t("frames")}`);
   }
 }
 
@@ -2220,17 +2574,17 @@ function renderPoseDiagnostics(status) {
   const directions = status.pose_directions || {};
   const node = $("fingerStates");
   if (!node) return;
-  node.innerHTML = FINGER_LABELS.map(([key, label]) => {
+  node.innerHTML = FINGER_LABELS.map(([key, labelKey]) => {
     const actual = states[key];
     const target = expected[key];
-    const actualText = actual === true ? "open" : actual === false ? "closed" : "--";
-    const targetText = target === true ? "open" : target === false ? "closed" : "any";
+    const actualText = actual === true ? t("open") : actual === false ? t("closed") : "--";
+    const targetText = target === true ? t("open") : target === false ? t("closed") : t("any");
     const matched = target === null || target === undefined || actual === target;
     return `
       <div class="finger-row">
-        <strong>${label}</strong>
+        <strong>${t(labelKey)}</strong>
         <span>${actualText} / ${targetText}</span>
-        <span class="${matched ? "match" : "mismatch"}">${matched ? "OK" : "NO"}</span>
+        <span class="${matched ? "match" : "mismatch"}">${matched ? t("ok") : t("no")}</span>
       </div>
     `;
   }).join("");
@@ -2250,7 +2604,7 @@ function renderLandmarks(landmarks) {
   const node = $("landmarkList");
   if (!node) return;
   if (!points.length) {
-    node.innerHTML = '<div class="empty">No hand points</div>';
+    node.innerHTML = `<div class="empty">${t("noHandPoints")}</div>`;
     return;
   }
   node.innerHTML = points.map((point) => `
@@ -2264,10 +2618,9 @@ function renderLandmarks(landmarks) {
 }
 
 function applyStatus(status) {
+  lastStatus = status;
   currentSource = status.source || "";
   setStateBadge(status.state);
-  text("transportBadge", status.transport);
-  text("transportText", status.transport);
   text("sourceLine", status.source);
   text("lastCommand", status.last_command);
   text("commandDisplay", status.last_command);
@@ -2282,7 +2635,7 @@ function applyStatus(status) {
   text("robotLastGesture", status.last_command_gesture);
   text(
     "robotTransferState",
-    status.last_command && status.last_command !== "UNKNOWN" ? "SENT" : "WAITING"
+    status.last_command && status.last_command !== "UNKNOWN" ? t("sentState") : t("waiting")
   );
   text("fps", fmt(status.fps, "", 1));
   text("latency", fmt(status.latency_ms, " ms", 1));
@@ -2303,7 +2656,9 @@ function applyStatus(status) {
   renderLandmarks(status.landmarks);
   renderGestureMap(status.selected_gesture);
   if (!settingsDirty) applySettings(settingsPayloadFromStatus(status));
-  if (!browserCameraMode) setVideoStarted(status.state === "running");
+  if (!browserCameraMode) {
+    setVideoStarted(status.state === "running" && !videoManuallyStopped);
+  }
 
   const errorPanel = $("errorPanel");
   if (status.error) {
@@ -2316,8 +2671,10 @@ function applyStatus(status) {
 }
 
 function reloadStream() {
+  videoManuallyStopped = false;
   const stream = $("stream");
   if (stream) stream.src = `${buildUrl("stream.mjpg")}?t=${Date.now()}`;
+  setVideoStarted(true);
 }
 
 async function refreshStatus() {
@@ -2329,7 +2686,7 @@ async function refreshStatus() {
     applyStatus(status);
   } catch (error) {
     showRuntimeError(
-      cameraAccessMessage("Backend is unavailable. Start the video backend.")
+      cameraAccessMessage(t("cameraBackendUnavailable"))
     );
   }
 }
@@ -2354,7 +2711,7 @@ function applySettings(settings) {
       input.value = value;
     }
   }
-  if (!settingsDirty) text("settingsStatus", "saved");
+  if (!settingsDirty) text("settingsStatus", t("saved"));
 }
 
 function readSettings() {
@@ -2371,13 +2728,13 @@ async function loadSettings() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     applySettings(await response.json());
   } catch (error) {
-    text("settingsStatus", "offline");
+    text("settingsStatus", t("offline"));
   }
 }
 
 async function saveSettings() {
   syncApiBaseFromInput();
-  text("settingsStatus", "saving");
+  text("settingsStatus", t("saving"));
   try {
     const response = await fetch(buildUrl("api/settings"), {
       method: "POST",
@@ -2388,9 +2745,9 @@ async function saveSettings() {
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     settingsDirty = false;
     applySettings(payload);
-    text("settingsStatus", "saved");
+    text("settingsStatus", t("saved"));
   } catch (error) {
-    text("settingsStatus", "error");
+    text("settingsStatus", t("error"));
     showRuntimeError(error.message);
   }
 }
@@ -2405,10 +2762,11 @@ async function refreshCommands() {
 async function startBrowserCamera() {
   syncApiBaseFromInput();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showRuntimeError(cameraAccessMessage("Browser camera API is unavailable on this page."));
+    showRuntimeError(cameraAccessMessage(t("browserCameraUnavailable")));
     return;
   }
   try {
+    videoManuallyStopped = false;
     browserStream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 640 },
@@ -2427,7 +2785,7 @@ async function startBrowserCamera() {
     video.hidden = false;
     setVideoStarted(true);
     setStateBadge("camera");
-    text("sourceLine", apiBase ? `browser-camera -> ${apiBase}` : "browser-camera -> same-origin");
+    text("sourceLine", "browser-camera");
     frameTimer = window.setInterval(captureAndSendFrame, BROWSER_CAMERA_FRAME_INTERVAL_MS);
   } catch (error) {
     showRuntimeError(cameraAccessMessage(error));
@@ -2435,6 +2793,7 @@ async function startBrowserCamera() {
 }
 
 function stopBrowserCamera() {
+  videoManuallyStopped = true;
   browserCameraMode = false;
   if (frameTimer !== null) {
     window.clearInterval(frameTimer);
@@ -2452,12 +2811,13 @@ function stopBrowserCamera() {
   }
   const stage = document.querySelector(".video-stage");
   if (stage) stage.classList.remove("browser-active");
+  clearVideoFrame();
   setVideoStarted(false);
-  reloadStream();
 }
 
 async function startVideo() {
   syncApiBaseFromInput();
+  videoManuallyStopped = false;
   if (!currentSource || currentSource === "browser-camera" || browserCameraMode) {
     await startBrowserCamera();
     return;
@@ -2473,6 +2833,8 @@ function stopVideo() {
     stopBrowserCamera();
     return;
   }
+  videoManuallyStopped = true;
+  clearVideoFrame();
   setVideoStarted(false);
 }
 
@@ -2488,7 +2850,7 @@ async function captureAndSendFrame() {
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas capture context is unavailable.");
+    if (!context) throw new Error(t("canvasUnavailable"));
     context.drawImage(video, 0, 0, width, height);
     const image = canvas.toDataURL("image/jpeg", 0.72);
     const response = await fetch(buildUrl("api/frame"), {
@@ -2518,7 +2880,7 @@ function renderCommands(commands) {
   const body = $("commandRows");
   if (!body) return;
   if (!commands.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty">No commands emitted</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="empty">${t("noCommands")}</td></tr>`;
     return;
   }
   body.innerHTML = commands.map((entry) => `
@@ -2535,10 +2897,15 @@ function renderCommands(commands) {
 function renderGestureMap(activeGesture = "UNKNOWN") {
   const node = $("gestureMap");
   if (!node) return;
-  node.innerHTML = GESTURE_COMMANDS.map(([gesture, command]) => `
+  node.innerHTML = GESTURE_COMMANDS.map(({ gesture, command, icon, labelKey }) => `
     <div class="gesture-item ${gesture === activeGesture ? "active" : ""}">
-      <strong>${gesture}</strong>
-      <span>${command}</span>
+      <span class="gesture-icon" title="${escapeHtml(t(labelKey))}" aria-hidden="true">
+        ${escapeHtml(icon)}
+      </span>
+      <div class="gesture-copy">
+        <strong>${escapeHtml(gesture)}</strong>
+        <span>${escapeHtml(command)}</span>
+      </div>
     </div>
   `).join("");
 }
@@ -2554,22 +2921,17 @@ function cameraAccessMessage(error) {
   const detail = typeof error === "string" ? error : error?.message || "";
   if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
     return [
-      "Camera/video access is required to control the robot.",
-      "Grant video permission and try again.",
+      t("cameraAccessRequired"),
+      t("grantVideoPermission"),
     ].join(" ");
   }
   return detail
-    ? `Camera/video access is required to control the robot. ${detail}`
-    : "Camera/video access is required to control the robot.";
+    ? `${t("cameraAccessRequired")} ${detail}`
+    : t("cameraAccessRequired");
 }
 
 function bindControls() {
-  const apiInput = $("apiBaseInput");
-  if (apiInput) {
-    apiInput.value = apiBase || window.localStorage.getItem("gestureApiBase") || "";
-    apiBase = apiInput.value.trim();
-    apiInput.addEventListener("change", syncApiBaseFromInput);
-  }
+  syncApiBaseFromInput();
   const startVideoButton = $("startVideoButton");
   if (startVideoButton) startVideoButton.addEventListener("click", startVideo);
   const sideStartButton = $("sideStartButton");
@@ -2578,12 +2940,15 @@ function bindControls() {
   if (stopVideoButton) stopVideoButton.addEventListener("click", stopVideo);
   const reloadButton = $("reloadButton");
   if (reloadButton) reloadButton.addEventListener("click", reloadStream);
+  for (const button of document.querySelectorAll("[data-language]")) {
+    button.addEventListener("click", () => setLanguage(button.getAttribute("data-language")));
+  }
   for (const id of ["staticFramesInput", "dynamicFramesInput", "emergencyFramesInput"]) {
     const input = $(id);
     if (input) {
       input.addEventListener("input", () => {
         settingsDirty = true;
-        text("settingsStatus", "unsaved");
+        text("settingsStatus", t("unsaved"));
       });
     }
   }
@@ -2592,6 +2957,7 @@ function bindControls() {
 }
 
 bindControls();
+applyStaticTranslations();
 renderGestureMap();
 loadSettings();
 refreshStatus();

@@ -61,6 +61,8 @@ class DynamicClassifierConfig:
     motion_end_frames: int = 3
     min_dynamic_segment_points: int = 5
     max_dynamic_segment_points: int = 36
+    early_dynamic_min_points: int = 10
+    early_dynamic_min_confidence: float = 0.85
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,7 @@ class DynamicSegmentUpdate:
     motion_energy: float
     active_points: int
     segment: TrajectoryBuffer | None = None
+    candidate_segment: TrajectoryBuffer | None = None
 
 
 class DynamicGestureSegmenter:
@@ -68,6 +69,10 @@ class DynamicGestureSegmenter:
                 state="recording_dynamic",
                 motion_energy=energy,
                 active_points=len(self._active_points),
+                candidate_segment=_segment_from_points(
+                    self._active_points,
+                    max(self._config.max_dynamic_segment_points, len(self._active_points)),
+                ),
             )
 
         energy = max(instant_energy, _window_motion_energy(list(self._pre_motion_points)))
@@ -136,11 +141,10 @@ class DynamicGestureSegmenter:
             self._still_frames,
             min_points=self._config.min_dynamic_segment_points,
         )
-        segment = TrajectoryBuffer(
-            max(self._config.max_dynamic_segment_points, len(segment_points))
+        segment = _segment_from_points(
+            segment_points,
+            max(self._config.max_dynamic_segment_points, len(segment_points)),
         )
-        for point in segment_points:
-            segment.add_point(point)
         active_points = len(segment_points)
         self.reset()
         return DynamicSegmentUpdate(
@@ -187,3 +191,13 @@ def _without_trailing_still_points(
     if still_frames <= 0 or len(points) - still_frames < min_points:
         return list(points)
     return list(points[:-still_frames])
+
+
+def _segment_from_points(
+    points: list[TrajectoryPoint],
+    max_size: int,
+) -> TrajectoryBuffer:
+    segment = TrajectoryBuffer(max(max_size, 1))
+    for point in points:
+        segment.add_point(point)
+    return segment

@@ -44,6 +44,22 @@ def test_dynamic_segmenter_ignores_stationary_scale_jitter() -> None:
     assert {update.state for update in updates} == {"stable_static"}
 
 
+def test_dynamic_segmenter_exposes_candidate_segment_while_recording() -> None:
+    config = DynamicClassifierConfig()
+    segmenter = DynamicGestureSegmenter(config)
+
+    updates = [
+        segmenter.update(_point(size=size, timestamp=float(index)))
+        for index, size in enumerate((0.200, 0.203, 0.207, 0.212, 0.218, 0.225))
+    ]
+
+    recording_update = updates[-1]
+    assert recording_update.state == "recording_dynamic"
+    assert recording_update.segment is None
+    assert recording_update.candidate_segment is not None
+    assert len(recording_update.candidate_segment) >= config.min_dynamic_segment_points
+
+
 def _point(
     *,
     size: float,

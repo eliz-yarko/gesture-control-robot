@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="uk">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,17 +10,38 @@
   <main class="app-shell">
     <header class="topbar">
       <div class="title-block">
-        <h1>Gesture Control Console</h1>
+        <h1 data-i18n="appTitle">Gesture Control Console</h1>
         <p id="sourceLine">camera:0</p>
       </div>
-      <div class="state-strip">
-        <span id="stateBadge" class="badge badge-muted">starting</span>
-        <span id="transportBadge" class="badge">mock</span>
+      <div class="language-switch" role="group" aria-label="Language">
+        <button id="langUkButton" class="language-button" type="button" data-language="uk">
+          UA
+        </button>
+        <button id="langEnButton" class="language-button" type="button" data-language="en">
+          EN
+        </button>
       </div>
     </header>
 
     <section class="workspace">
       <section class="video-panel" aria-label="Recognition stream">
+        <div class="video-toolbar">
+          <div>
+            <span class="eyebrow" data-i18n="cameraFeed">camera feed</span>
+            <strong data-i18n="liveGestureRecognition">Live gesture recognition</strong>
+          </div>
+          <div class="control-buttons compact-actions">
+            <button id="sideStartButton" class="primary-button" type="button">
+              Start
+            </button>
+            <button id="stopVideoButton" class="secondary-button" type="button">
+              Stop
+            </button>
+            <button id="reloadButton" class="secondary-button" type="button">
+              Reload
+            </button>
+          </div>
+        </div>
         <div class="video-stage">
           <img id="stream" src="stream.mjpg" alt="Live gesture recognition stream">
           <video id="browserVideo" class="browser-video" autoplay playsinline muted hidden></video>
@@ -29,152 +50,182 @@
             Start video
           </button>
         </div>
-        <p class="video-access-note">
+        <p class="video-access-note" data-i18n="cameraAccessNote">
           Camera/video access is required to recognize gestures and control the robot.
         </p>
         <div class="frame-strip">
-          <div><span>Selected</span><strong id="selectedGesture">UNKNOWN</strong></div>
-          <div><span>Last command</span><strong id="lastCommand">UNKNOWN</strong></div>
-          <div><span>Confidence</span><strong id="selectedConfidence">0.00</strong></div>
-          <div><span>Dynamic state</span><strong id="dynamicState">idle</strong></div>
+          <div>
+            <span data-i18n="selectedGesture">Selected gesture</span>
+            <strong id="selectedGesture">UNKNOWN</strong>
+          </div>
+          <div>
+            <span data-i18n="preparedCommand">Prepared command</span>
+            <strong id="lastCommand">UNKNOWN</strong>
+          </div>
+          <div>
+            <span data-i18n="confidence">Confidence</span>
+            <strong id="selectedConfidence">0.00</strong>
+          </div>
+          <div>
+            <span data-i18n="motionState">Motion state</span>
+            <strong id="dynamicState">idle</strong>
+          </div>
         </div>
       </section>
 
       <aside class="status-rail">
-        <section class="panel control-panel">
-          <span class="eyebrow">control</span>
-          <div class="control-buttons">
-            <button id="sideStartButton" class="primary-button" type="button">Start</button>
-            <button id="stopVideoButton" class="secondary-button" type="button">Stop</button>
-            <button id="reloadButton" class="secondary-button" type="button">Reload</button>
+        <section class="panel command-flow-panel confirmation-panel">
+          <div class="section-header compact-header">
+            <div>
+              <span class="eyebrow" data-i18n="commandFlow">command flow</span>
+              <h2 data-i18n="confirmationToRobot">Confirmation to robot</h2>
+            </div>
+            <span id="robotTransferState" data-i18n="waiting">WAITING</span>
           </div>
-          <label class="field-label">
-            <span>Backend URL</span>
-            <input
-              id="apiBaseInput"
-              class="api-input"
-              type="url"
-              inputmode="url"
-              placeholder="same-origin"
-              aria-label="Backend URL"
-            >
-          </label>
-        </section>
 
-        <section class="panel robot-panel">
-          <span class="eyebrow">robot transmission</span>
-          <strong id="robotTransferState">WAITING</strong>
+          <div class="flow-grid">
+            <div class="flow-node">
+              <span data-i18n="candidate">Candidate</span>
+              <strong id="candidateCommand">UNKNOWN</strong>
+              <small id="candidateGesture">UNKNOWN / 0.00</small>
+            </div>
+            <div class="flow-arrow" aria-hidden="true">&rarr;</div>
+            <div class="flow-node confirmed-node">
+              <span data-i18n="sentCommand">Sent command</span>
+              <strong id="commandDisplay">UNKNOWN</strong>
+              <small id="lastCommandMeta">UNKNOWN / 0.00</small>
+            </div>
+          </div>
+
+          <div class="progress-block">
+            <div class="progress-track" aria-hidden="true">
+              <span id="confirmationProgressBar"></span>
+            </div>
+            <span id="confirmationProgressText">0 / 0 frames</span>
+          </div>
+
           <div class="robot-grid">
-            <div><span>Transport</span><b id="transportText">mock</b></div>
-            <div><span>Sent</span><b id="robotCommandCount">0</b></div>
-            <div><span>Last gesture</span><b id="robotLastGesture">UNKNOWN</b></div>
+            <div><span data-i18n="sent">Sent</span><b id="robotCommandCount">0</b></div>
+            <div>
+              <span data-i18n="lastGesture">Last gesture</span>
+              <b id="robotLastGesture">UNKNOWN</b>
+            </div>
           </div>
-        </section>
-
-        <section class="panel command-panel">
-          <span class="eyebrow">last confirmed command</span>
-          <strong id="commandDisplay">UNKNOWN</strong>
-          <span id="lastCommandMeta">UNKNOWN / 0.00</span>
-        </section>
-
-        <section class="panel confirmation-panel">
-          <span class="eyebrow">confirmation</span>
-          <strong id="candidateCommand">UNKNOWN</strong>
-          <span id="candidateGesture">UNKNOWN / 0.00</span>
-          <div class="progress-track" aria-hidden="true">
-            <span id="confirmationProgressBar"></span>
-          </div>
-          <span id="confirmationProgressText">0 / 0 frames</span>
         </section>
 
         <section class="panel settings-panel">
           <div class="section-header compact-header">
-            <h2>Confirmation frames</h2>
-            <span id="settingsStatus">saved</span>
+            <div>
+              <span class="eyebrow" data-i18n="confirmationRules">confirmation rules</span>
+              <h2 data-i18n="framesBeforeSend">Frames before send</h2>
+            </div>
+            <span id="settingsStatus" data-i18n="saved">saved</span>
           </div>
           <div class="settings-grid">
             <label>
-              <span>Static</span>
+              <span data-i18n="stillGesture">Still gesture</span>
               <input id="staticFramesInput" type="number" min="1" max="12" step="1" value="5">
             </label>
             <label>
-              <span>Dynamic</span>
+              <span data-i18n="motionGesture">Motion gesture</span>
               <input id="dynamicFramesInput" type="number" min="1" max="12" step="1" value="1">
             </label>
             <label>
-              <span>Emergency</span>
+              <span data-i18n="emergencyStop">Emergency stop</span>
               <input id="emergencyFramesInput" type="number" min="1" max="12" step="1" value="3">
             </label>
           </div>
-          <button id="saveSettingsButton" class="primary-button full-button" type="button">
+          <button
+            id="saveSettingsButton"
+            class="primary-button full-button"
+            type="button"
+            data-i18n="apply"
+          >
             Apply
           </button>
         </section>
 
         <section class="metrics-grid">
           <div class="metric"><span>FPS</span><strong id="fps">0.0</strong></div>
-          <div class="metric"><span>Latency</span><strong id="latency">0 ms</strong></div>
-          <div class="metric"><span>Hands</span><strong id="handCount">0</strong></div>
-          <div class="metric"><span>Frame</span><strong id="frameIndex">0</strong></div>
+          <div class="metric">
+            <span data-i18n="latency">Latency</span>
+            <strong id="latency">0 ms</strong>
+          </div>
+          <div class="metric">
+            <span data-i18n="hands">Hands</span>
+            <strong id="handCount">0</strong>
+          </div>
+          <div class="metric">
+            <span data-i18n="frame">Frame</span>
+            <strong id="frameIndex">0</strong>
+          </div>
         </section>
 
         <section class="panel split-panel">
-          <div><span>Static</span><strong id="staticGesture">UNKNOWN</strong></div>
-          <div><span>Dynamic</span><strong id="dynamicGesture">UNKNOWN</strong></div>
+          <div>
+            <span data-i18n="stillRecognition">Still recognition</span>
+            <strong id="staticGesture">UNKNOWN</strong>
+          </div>
+          <div>
+            <span data-i18n="motionRecognition">Motion recognition</span>
+            <strong id="dynamicGesture">UNKNOWN</strong>
+          </div>
         </section>
 
-        <section class="panel pose-panel">
-          <div class="section-header compact-header">
-            <h2>Hand pose</h2>
-            <span id="poseDirection">--</span>
-          </div>
+        <details class="panel pose-panel">
+          <summary>
+            <span data-i18n="handPoseDiagnostics">Hand pose diagnostics</span>
+            <b id="poseDirection">--</b>
+          </summary>
           <div id="fingerStates" class="finger-states"></div>
-        </section>
+        </details>
 
-        <section class="panel landmarks-panel">
-          <div class="section-header compact-header">
-            <h2>Landmark points</h2>
-            <span id="landmarkCount">0 / 21</span>
-          </div>
+        <details class="panel landmarks-panel">
+          <summary>
+            <span data-i18n="technicalHandLandmarks">Technical hand landmarks</span>
+            <b id="landmarkCount">0 / 21</b>
+          </summary>
           <div id="landmarkList" class="landmark-list"></div>
-        </section>
+        </details>
 
         <section class="panel error-panel" id="errorPanel" hidden>
-          <span class="eyebrow">runtime</span>
+          <span class="eyebrow" data-i18n="runtime">runtime</span>
           <strong id="errorText"></strong>
         </section>
       </aside>
     </section>
 
     <section class="lower-grid">
-      <section class="log-band">
-        <div class="section-header">
-          <h2>Command Log</h2>
-          <span id="updatedAt">--:--:--</span>
+      <details class="log-band collapsible-panel">
+        <summary>
+          <span data-i18n="commandLog">Command Log</span>
+          <b id="updatedAt">--:--:--</b>
+        </summary>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="time">Time</th>
+                <th data-i18n="command">Command</th>
+                <th data-i18n="gesture">Gesture</th>
+                <th data-i18n="confidence">Confidence</th>
+                <th data-i18n="frame">Frame</th>
+              </tr>
+            </thead>
+            <tbody id="commandRows">
+              <tr><td colspan="5" class="empty" data-i18n="noCommands">No commands emitted</td></tr>
+            </tbody>
+          </table>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Command</th>
-              <th>Gesture</th>
-              <th>Confidence</th>
-              <th>Frame</th>
-            </tr>
-          </thead>
-          <tbody id="commandRows">
-            <tr><td colspan="5" class="empty">No commands emitted</td></tr>
-          </tbody>
-        </table>
-      </section>
+      </details>
 
-      <section class="map-band">
-        <div class="section-header">
-          <h2>Gesture Map</h2>
-          <span>13 gestures</span>
-        </div>
+      <details class="map-band collapsible-panel" open>
+        <summary>
+          <span data-i18n="gestureMap">Gesture Map</span>
+          <b data-i18n="gestureCount">13 gestures</b>
+        </summary>
         <div id="gestureMap" class="gesture-map"></div>
-      </section>
+      </details>
     </section>
   </main>
   <script src="app.js"></script>
