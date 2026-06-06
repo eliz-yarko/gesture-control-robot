@@ -1,33 +1,29 @@
 group,label,support,predicted,true_positive,false_positive,false_negative,precision,recall,f1
-ipn_hand / stable+plain+static / video,UNKNOWN,20,13,7,6,13,0.5384615384615384,0.35,0.4242424242424242
-ipn_hand / stable+plain+static / video,OPEN_PALM,0,3,0,3,0,0.0,0.0,0.0
-ipn_hand / stable+plain+static / video,FIST,0,1,0,1,0,0.0,0.0,0.0
-ipn_hand / stable+plain+static / video,THUMB_UP,0,5,0,5,0,0.0,0.0,0.0
-ipn_hand / stable+plain+static / video,PEACE,0,4,0,4,0,0.0,0.0,0.0
-ipn_hand / stable+plain+static / video,WAVE_LR,8,8,6,2,2,0.75,0.75,0.75
-ipn_hand / stable+plain+static / video,CIRCLE,0,3,0,3,0,0.0,0.0,0.0
-ipn_hand / stable+plain+static / video,PULL_TOWARD,12,3,2,1,10,0.6666666666666666,0.16666666666666666,0.26666666666666666
-ipn_hand / stable+clutter+static / video,UNKNOWN,10,14,0,14,10,0.0,0.0,0.0
-ipn_hand / stable+clutter+static / video,OPEN_PALM,0,1,0,1,0,0.0,0.0,0.0
-ipn_hand / stable+clutter+static / video,FIST,0,3,0,3,0,0.0,0.0,0.0
-ipn_hand / stable+clutter+static / video,THUMB_UP,0,6,0,6,0,0.0,0.0,0.0
-ipn_hand / stable+clutter+static / video,WAVE_LR,14,3,3,0,11,1.0,0.21428571428571427,0.35294117647058826
-ipn_hand / stable+clutter+static / video,CIRCLE,0,2,0,2,0,0.0,0.0,0.0
-ipn_hand / stable+clutter+static / video,PULL_TOWARD,11,6,4,2,7,0.6666666666666666,0.36363636363636365,0.4705882352941177
-ipn_hand / dark+clutter+static / video,UNKNOWN,0,5,0,5,0,0.0,0.0,0.0
-ipn_hand / dark+clutter+static / video,WAVE_LR,8,7,7,0,1,1.0,0.875,0.9333333333333333
+ipn_hand / stable+plain+static / video,UNKNOWN,20,24,6,18,14,0.25,0.3,0.2727272727272727
+ipn_hand / stable+plain+static / video,THUMB_UP,0,4,0,4,0,0.0,0.0,0.0
+ipn_hand / stable+plain+static / video,THUMB_DOWN,0,1,0,1,0,0.0,0.0,0.0
+ipn_hand / stable+plain+static / video,INDEX_LEFT,0,9,0,9,0,0.0,0.0,0.0
+ipn_hand / stable+plain+static / video,WAVE_LR,8,0,0,0,8,0.0,0.0,0.0
+ipn_hand / stable+plain+static / video,CIRCLE,0,2,0,2,0,0.0,0.0,0.0
+ipn_hand / stable+plain+static / video,PULL_TOWARD,12,0,0,0,12,0.0,0.0,0.0
+ipn_hand / stable+clutter+static / video,UNKNOWN,10,26,1,25,9,0.038461538461538464,0.1,0.05555555555555555
+ipn_hand / stable+clutter+static / video,THUMB_UP,0,8,0,8,0,0.0,0.0,0.0
+ipn_hand / stable+clutter+static / video,INDEX_LEFT,0,1,0,1,0,0.0,0.0,0.0
+ipn_hand / stable+clutter+static / video,WAVE_LR,14,0,0,0,14,0.0,0.0,0.0
+ipn_hand / stable+clutter+static / video,PULL_TOWARD,11,0,0,0,11,0.0,0.0,0.0
+ipn_hand / dark+clutter+static / video,UNKNOWN,0,12,0,12,0,0.0,0.0,0.0
+ipn_hand / dark+clutter+static / video,WAVE_LR,8,0,0,0,8,0.0,0.0,0.0
 ipn_hand / dark+clutter+static / video,PULL_TOWARD,4,0,0,0,4,0.0,0.0,0.0
-ipn_hand / stable+clutter+dynamic / video,CIRCLE,0,1,0,1,0,0.0,0.0,0.0
+ipn_hand / stable+clutter+dynamic / video,UNKNOWN,0,1,0,1,0,0.0,0.0,0.0
 ipn_hand / stable+clutter+dynamic / video,PULL_TOWARD,1,0,0,0,1,0.0,0.0,0.0
-ipn_hand / light+clutter+dynamic / video,CIRCLE,0,1,0,1,0,0.0,0.0,0.0
+ipn_hand / light+clutter+dynamic / video,UNKNOWN,0,1,0,1,0,0.0,0.0,0.0
 ipn_hand / light+clutter+dynamic / video,PULL_TOWARD,1,0,0,0,1,0.0,0.0,0.0
 ipn_hand / light+clutter+static / video,UNKNOWN,0,1,0,1,0,0.0,0.0,0.0
 ipn_hand / light+clutter+static / video,PULL_TOWARD,1,0,0,0,1,0.0,0.0,0.0
-ALL,UNKNOWN,30,33,7,26,23,0.21212121212121213,0.23333333333333334,0.22222222222222224
-ALL,OPEN_PALM,0,4,0,4,0,0.0,0.0,0.0
-ALL,FIST,0,4,0,4,0,0.0,0.0,0.0
-ALL,THUMB_UP,0,11,0,11,0,0.0,0.0,0.0
-ALL,PEACE,0,4,0,4,0,0.0,0.0,0.0
-ALL,WAVE_LR,30,18,16,2,14,0.8888888888888888,0.5333333333333333,0.6666666666666667
-ALL,CIRCLE,0,7,0,7,0,0.0,0.0,0.0
-ALL,PULL_TOWARD,30,9,6,3,24,0.6666666666666666,0.2,0.30769230769230765
+ALL,UNKNOWN,30,65,7,58,23,0.1076923076923077,0.23333333333333334,0.1473684210526316
+ALL,THUMB_UP,0,12,0,12,0,0.0,0.0,0.0
+ALL,THUMB_DOWN,0,1,0,1,0,0.0,0.0,0.0
+ALL,INDEX_LEFT,0,10,0,10,0,0.0,0.0,0.0
+ALL,WAVE_LR,30,0,0,0,30,0.0,0.0,0.0
+ALL,CIRCLE,0,2,0,2,0,0.0,0.0,0.0
+ALL,PULL_TOWARD,30,0,0,0,30,0.0,0.0,0.0

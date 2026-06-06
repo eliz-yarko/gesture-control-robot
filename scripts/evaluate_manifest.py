@@ -18,12 +18,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.capture.video_capture import CapturedFrame  # noqa: E402
 from src.config import AppConfig, VideoConfig  # noqa: E402
 from src.domain import GestureID, GesturePrediction  # noqa: E402
 from src.evaluation import EvaluationSample, PredictionRecord, read_manifest  # noqa: E402
 from src.evaluation.manifest import write_prediction_records  # noqa: E402
+from src.pipeline import GestureControlPipeline  # noqa: E402
 from src.recognition import (
     DynamicGestureClassifier,
+    FallbackDynamicGestureClassifier,
+    FallbackStaticGestureClassifier,
     HandDetector,
     SklearnDynamicGestureClassifier,
     SklearnStaticGestureClassifier,
@@ -46,6 +50,7 @@ class SampleEvaluator:
         mirror_frame: bool,
         static_model: Path | None = None,
         dynamic_model: Path | None = None,
+        fallback_to_heuristics: bool = False,
     ) -> None:
         """Initialize reusable detector and classifier objects."""
 
@@ -56,15 +61,15 @@ class SampleEvaluator:
         self._mirror_frame = mirror_frame
         self._cv2 = importlib.import_module("cv2")
         self._detector = HandDetector(config.hand_detection)
-        self._static_classifier = (
-            SklearnStaticGestureClassifier.load_path(static_model)
-            if static_model is not None
-            else StaticGestureClassifier(config.static_classifier)
+        self._static_classifier = _build_static_classifier(
+            config,
+            static_model,
+            fallback_to_heuristics,
         )
-        self._dynamic_classifier = (
-            SklearnDynamicGestureClassifier.load_path(dynamic_model)
-            if dynamic_model is not None
-            else DynamicGestureClassifier(config.dynamic_classifier)
+        self._dynamic_classifier = _build_dynamic_classifier(
+            config,
+            dynamic_model,
+            fallback_to_heuristics,
         )
 
     def evaluate(self, sample: EvaluationSample) -> PredictionRecord:
@@ -127,6 +132,9 @@ class SampleEvaluator:
         self,
         sample: EvaluationSample,
     ) -> tuple[GesturePrediction, float | None, float | None, int, str]:
+        if self._classifier_mode == "pipeline":
+            return self._evaluate_video_pipeline(sample)
+
         capture = self._cv2.VideoCapture(str(sample.path))
         if not capture.isOpened():
             raise RuntimeError(f"Cannot open video: {sample.path}")
@@ -178,6 +186,85 @@ class SampleEvaluator:
             dynamic_predictions=dynamic_predictions,
         )
         note = "" if prediction.gesture_id != GestureID.UNKNOWN else "no_sequence_prediction"
+        return (
+            prediction,
+            (elapsed_seconds * 1000) / processed_frames,
+            processed_frames / elapsed_seconds if elapsed_seconds > 0 else None,
+            processed_frames,
+            note,
+        )
+
+    def _evaluate_video_pipeline(
+        self,
+        sample: EvaluationSample,
+    ) -> tuple[GesturePrediction, float | None, float | None, int, str]:
+        capture = self._cv2.VideoCapture(str(sample.path))
+        if not capture.isOpened():
+            raise RuntimeError(f"Cannot open video: {sample.path}")
+
+        pipeline = GestureControlPipeline(
+            config=self._config,
+            detector=self._detector,
+            static_classifier=self._static_classifier,
+            dynamic_classifier=self._dynamic_classifier,
+        )
+        command_predictions: list[GesturePrediction] = []
+        selected_predictions: list[GesturePrediction] = []
+        processed_frames = 0
+        decoded_frames = 0
+        started_at = perf_counter()
+
+        try:
+            while self._max_frames is None or processed_frames < self._max_frames:
+                success, frame = capture.read()
+                if not success:
+                    break
+                decoded_frames += 1
+                if sample.start_frame is not None and decoded_frames < sample.start_frame:
+                    continue
+                if sample.end_frame is not None and decoded_frames > sample.end_frame:
+                    break
+                segment_start = sample.start_frame or 1
+                if (decoded_frames - segment_start) % self._frame_stride != 0:
+                    continue
+
+                frame = self._prepare_video_frame(frame)
+                rgb_frame = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+                result = pipeline.process(
+                    CapturedFrame(
+                        bgr_frame=frame,
+                        rgb_frame=rgb_frame,
+                        index=processed_frames,
+                    )
+                )
+                processed_frames += 1
+                selected_predictions.append(result.selected_prediction)
+                if result.command_event is not None:
+                    command_predictions.append(
+                        GesturePrediction(
+                            gesture_id=result.command_event.gesture_id,
+                            confidence=result.command_event.confidence,
+                            metadata={"source": "command_event"},
+                        )
+                    )
+        finally:
+            capture.release()
+
+        elapsed_seconds = perf_counter() - started_at
+        if processed_frames == 0:
+            return GesturePrediction.unknown("empty_video"), None, None, 0, "empty_video"
+
+        if command_predictions:
+            prediction = _majority_prediction(command_predictions)
+            note = "confirmed_command"
+        else:
+            prediction = _majority_prediction(selected_predictions)
+            note = (
+                "selected_prediction_without_command"
+                if prediction.gesture_id != GestureID.UNKNOWN
+                else "no_pipeline_prediction"
+            )
+
         return (
             prediction,
             (elapsed_seconds * 1000) / processed_frames,
@@ -264,7 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True, help="Output predictions CSV.")
     parser.add_argument(
         "--classifier-mode",
-        choices=("auto", "static", "dynamic", "best"),
+        choices=("auto", "static", "dynamic", "best", "pipeline"),
         default="auto",
         help="How to aggregate video/sequence predictions.",
     )
@@ -290,6 +377,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mirror-frame", action="store_true", help="Mirror frames before detection."
+    )
+    parser.add_argument(
+        "--fallback-to-heuristics",
+        action="store_true",
+        help=(
+            "Use model classifiers with the same heuristic fallback behavior as the "
+            "runtime UI."
+        ),
     )
     parser.add_argument(
         "--continue-on-error",
@@ -323,6 +418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         mirror_frame=args.mirror_frame,
         static_model=Path(args.static_model) if args.static_model is not None else None,
         dynamic_model=Path(args.dynamic_model) if args.dynamic_model is not None else None,
+        fallback_to_heuristics=args.fallback_to_heuristics,
     )
     records: list[PredictionRecord] = []
 
@@ -341,6 +437,54 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_prediction_records(output_path, records)
     print(f"Wrote predictions: {output_path}")
     return 0
+
+
+def _build_static_classifier(
+    config: AppConfig,
+    static_model: Path | None,
+    fallback_to_heuristics: bool,
+) -> object:
+    fallback = StaticGestureClassifier(config.static_classifier)
+    if static_model is None:
+        return fallback
+
+    primary = SklearnStaticGestureClassifier.load_path(
+        static_model,
+        min_confidence=(
+            config.command_mapping.min_confidence if fallback_to_heuristics else None
+        ),
+    )
+    if not fallback_to_heuristics:
+        return primary
+    return FallbackStaticGestureClassifier(primary=primary, fallback=fallback)
+
+
+def _build_dynamic_classifier(
+    config: AppConfig,
+    dynamic_model: Path | None,
+    fallback_to_heuristics: bool,
+) -> object:
+    fallback = DynamicGestureClassifier(config.dynamic_classifier)
+    if dynamic_model is None:
+        return fallback
+
+    primary = SklearnDynamicGestureClassifier.load_path(
+        dynamic_model,
+        min_confidence=(
+            config.command_mapping.min_confidence if fallback_to_heuristics else None
+        ),
+        min_points=(
+            max(
+                config.dynamic_classifier.min_window_points,
+                config.dynamic_classifier.buffer_size // 3,
+            )
+            if fallback_to_heuristics
+            else 30
+        ),
+    )
+    if not fallback_to_heuristics:
+        return primary
+    return FallbackDynamicGestureClassifier(primary=primary, fallback=fallback)
 
 
 def _extract_landmark_frames(payload: Any) -> list[list[Landmark]]:

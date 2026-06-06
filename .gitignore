@@ -42,4 +42,18 @@ models/*.pkl
 *.log
 *.tmp
 *.docx
+*.pdf
+*.backup-*.docx
 scripts/tmp_*
+
+# Local thesis documents
+/ГМБП_ІСТ_КПІ_2026_ЯрмоленкоЄлизаветаМиколаївна.pdf
+/ІК-23 Ярмоленко звіт.docx
+/ІК-23 Ярмоленко щоденник.docx
+/ПЗБП_ІСТ_КПІ_2026_ЯрмоленкоЄлизаветаМиколаївна.docx
+
+# Generated thesis/report artifacts
+docs/figures/
+data/benchmarks/thesis_validated/
+data/benchmarks/*heuristic*.csv
+data/benchmarks/*model_mirror*.csv
