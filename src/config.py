@@ -54,7 +54,7 @@ class DynamicClassifierConfig:
     max_circle_angle_span: float = 7.4
     min_pull_scale_growth: float = 0.10
     min_confidence: float = 0.6
-    selection_min_confidence: float = 0.75
+    selection_min_confidence: float = 0.30
     motion_start_threshold: float = 0.02
     motion_end_threshold: float = 0.012
     motion_start_frames: int = 2
@@ -63,17 +63,16 @@ class DynamicClassifierConfig:
     max_dynamic_segment_points: int = 36
     early_dynamic_min_points: int = 10
     early_dynamic_min_confidence: float = 0.85
-
-
-@dataclass(frozen=True)
-class PredictionSmoothingConfig:
-    """Temporal smoothing for frame-level classifier predictions."""
-
-    enabled: bool = True
-    static_window_size: int = 5
-    static_min_votes: int = 2
-    static_min_confidence: float = 0.45
-    conflict_margin: float = 0.08
+    static_priority_min_confidence: float = 0.65
+    static_priority_frames: int = 2
+    static_transition_grace_frames: int = 4
+    dynamic_min_confirm_points: int = 5
+    dynamic_min_confirm_path: float = 0.08
+    dynamic_min_confirm_mean_step: float = 0.006
+    dynamic_min_confirm_scale_growth: float = 0.08
+    dynamic_static_compatibility_min_confidence: float = 0.65
+    min_pull_confirm_sustained_growth: float = 0.12
+    min_pull_confirm_positive_step_ratio: float = 0.55
 
 
 @dataclass(frozen=True)
@@ -90,11 +89,14 @@ class CalibrationConfig:
 class CommandMappingConfig:
     """Debouncing and command emission settings."""
 
-    static_confirmation_frames: int = 3
+    static_confirmation_frames: int = 5
     dynamic_confirmation_frames: int = 1
-    emergency_confirmation_frames: int = 2
+    emergency_confirmation_frames: int = 3
     min_confidence: float = 0.65
+    dynamic_min_confidence: float = 0.30
+    emergency_min_confidence: float = 0.85
     repeat_same_command: bool = False
+    suppress_static_commands_during_motion: bool = True
 
 
 @dataclass(frozen=True)
@@ -115,9 +117,6 @@ class AppConfig:
     hand_detection: HandDetectionConfig = field(default_factory=HandDetectionConfig)
     static_classifier: StaticClassifierConfig = field(default_factory=StaticClassifierConfig)
     dynamic_classifier: DynamicClassifierConfig = field(default_factory=DynamicClassifierConfig)
-    prediction_smoothing: PredictionSmoothingConfig = field(
-        default_factory=PredictionSmoothingConfig
-    )
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     command_mapping: CommandMappingConfig = field(default_factory=CommandMappingConfig)
     sender: SenderConfig = field(default_factory=SenderConfig)

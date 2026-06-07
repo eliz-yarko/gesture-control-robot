@@ -119,6 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Deterministic jittered copies to add for each dynamic trajectory window.",
     )
+    parser.add_argument(
+        "--dynamic-positive-min-window-ratio",
+        type=float,
+        default=0.0,
+        help=(
+            "Train-only pretrigger control: mark derived dynamic windows shorter than "
+            "this fraction of the full trajectory as UNKNOWN."
+        ),
+    )
     parser.add_argument("--mirror-frame", action="store_true")
     return parser
 
@@ -164,6 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         str(args.min_dynamic_window_points),
         "--dynamic-augmentation-copies",
         str(args.dynamic_augmentation_copies),
+        "--dynamic-positive-min-window-ratio",
+        str(args.dynamic_positive_min_window_ratio),
     ]
     if args.mirror_frame:
         train_args.append("--mirror-frame")

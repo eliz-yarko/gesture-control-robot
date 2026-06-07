@@ -12,6 +12,7 @@ from src.recognition.gesture_pose import (
 )
 from src.recognition.hand_detector import HandDetection, HandDetector
 from src.recognition.model_classifier import (
+    ConfidenceFallbackStaticGestureClassifier,
     FallbackDynamicGestureClassifier,
     FallbackStaticGestureClassifier,
     SklearnDynamicGestureClassifier,
@@ -26,6 +27,7 @@ __all__ = [
     "DynamicGestureSegmenter",
     "EXPECTED_STATIC_POSES",
     "FINGER_NAMES",
+    "ConfidenceFallbackStaticGestureClassifier",
     "FallbackDynamicGestureClassifier",
     "FallbackStaticGestureClassifier",
     "FingerStates",

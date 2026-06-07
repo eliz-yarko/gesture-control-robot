@@ -1,0 +1,42 @@
+{
+  "baseline": {
+    "accuracy": 0.8819444444444444,
+    "critical_false_positive_rate": 0.023622047244094488,
+    "macro_f1": 0.8852144516343122,
+    "macro_precision": 0.9022661696257449,
+    "macro_recall": 0.8722378903714595,
+    "mean_fps": null,
+    "mean_latency_ms": 243.04989784852498,
+    "min_fps": null,
+    "p95_latency_ms": 530.527900904417,
+    "sample_count": 144,
+    "unknown_rate": 0.1527777777777778,
+    "weighted_f1": 0.8874969028261711
+  },
+  "class_thresholds": {
+    "FIST": 0.25,
+    "INDEX_RIGHT": 0.32,
+    "OK_SIGN": 0.32,
+    "OPEN_PALM": 0.25,
+    "PEACE": 0.38,
+    "THREE_FINGERS": 0.4,
+    "THUMB_DOWN": 0.46,
+    "THUMB_UP": 0.32
+  },
+  "min_confidence": 0.25,
+  "source": "data\\processed\\benchmark_inputs\\hagrid_static_subset_control_static_v10_predictions.csv",
+  "tuned": {
+    "accuracy": 0.8680555555555556,
+    "critical_false_positive_rate": 0.007874015748031496,
+    "macro_f1": 0.9062714870894595,
+    "macro_precision": 0.9780219780219781,
+    "macro_recall": 0.8470278063378461,
+    "mean_fps": null,
+    "mean_latency_ms": 243.04989784852498,
+    "min_fps": null,
+    "p95_latency_ms": 530.527900904417,
+    "sample_count": 144,
+    "unknown_rate": 0.25,
+    "weighted_f1": 0.9080656938044035
+  }
+}

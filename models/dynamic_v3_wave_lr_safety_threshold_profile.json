@@ -1,0 +1,8 @@
+{
+  "class_thresholds": {
+    "WAVE_LR": 0.38
+  },
+  "min_confidence": null,
+  "source": "own_control_static_v3_primary_v10_tuned_fallback_p040_dynamic_v3_pipeline_dense_valid_predictions.csv",
+  "notes": "Train-free safety overlay: demotes the observed false confirmed WAVE_LR at confidence 0.354 while retaining the own-control true WAVE_LR at confidence above 0.38."
+}

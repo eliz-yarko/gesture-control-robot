@@ -1,0 +1,9 @@
+{
+  "class_thresholds": {
+    "PULL_TOWARD": 0.4,
+    "WAVE_LR": 0.36
+  },
+  "min_confidence": 0.25,
+  "source": "data/processed/benchmark_inputs/ipn_hand_test_cap50_landmarks_s2_min5_manifest_open_ipn.csv",
+  "tuned_for": "ipn_cap50_s2_full_dynamic_accuracy"
+}

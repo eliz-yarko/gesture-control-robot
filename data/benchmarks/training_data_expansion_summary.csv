@@ -1,0 +1,4 @@
+run_id,source_manifest,total_samples,valid_min5_samples,pull_toward_valid,unknown_valid,wave_lr_valid,notes
+ipn_train_cap60_s2_complete,data/processed/training/ipn_hand_train_cap60_landmarks_s2_complete_min5_manifest.csv,180,141,53,30,58,"Completed previously partial cap60 stride2 export; useful but UNKNOWN remained below the 40-60 target when combined with own train."
+ipn_train_cap100_s2_complete,data/processed/training/ipn_hand_train_cap100_landmarks_s2_complete_min5_manifest.csv,300,234,80,56,98,"Expanded IPN train limit-per-class to 100; reaches the requested 40-60+ valid UNKNOWN/D0X training range without new own recordings."
+combined_own_dense_ipn_cap100_s2,data/processed/training/combined_own_dense_ipn_cap100_s2_min5_manifest.csv,311,309,85,61,102,"Candidate combined train manifest using own dense train landmarks plus IPN cap100 stride2 min5 landmarks; valid counts are computed from source manifests because the merged manifest does not preserve frame_count."

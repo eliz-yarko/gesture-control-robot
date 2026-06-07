@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from scripts.evaluate_manifest import SampleEvaluator, _stable_static_prediction, build_parser
+from src.domain import GestureID, GesturePrediction
 from src.evaluation import (
     PredictionRecord,
     build_manifest_from_directory,
@@ -11,6 +13,7 @@ from src.evaluation import (
     summarize_counts,
 )
 from src.evaluation.manifest import write_prediction_records
+from src.recognition.trajectory_buffer import TrajectoryBuffer
 
 
 def test_read_manifest_normalizes_labels_and_relative_paths(tmp_path: Path) -> None:
@@ -109,6 +112,21 @@ def test_write_prediction_records_matches_benchmark_input_schema(tmp_path: Path)
     ]
 
 
+def test_evaluate_parser_accepts_dynamic_confirmation_override() -> None:
+    args = build_parser().parse_args(
+        [
+            "--manifest",
+            "manifest.csv",
+            "--output",
+            "predictions.csv",
+            "--dynamic-confirmation-frames",
+            "2",
+        ]
+    )
+
+    assert args.dynamic_confirmation_frames == 2
+
+
 def test_build_manifest_from_directory_maps_hagrid_subset(tmp_path: Path) -> None:
     input_dir = tmp_path / "external" / "hagrid_v2"
     (input_dir / "fist").mkdir(parents=True)
@@ -155,3 +173,87 @@ def test_build_manifest_can_include_unknown_samples(tmp_path: Path) -> None:
 
     assert result.counts_by_gesture == {"PULL_TOWARD": 1, "UNKNOWN": 1}
     assert summarize_counts(result.counts_by_gesture) == "PULL_TOWARD=1, UNKNOWN=1"
+
+
+def test_stable_static_prediction_accepts_known_majority_with_unknowns() -> None:
+    prediction = _stable_static_prediction(
+        [
+            GesturePrediction(GestureID.THUMB_UP, 0.7),
+            GesturePrediction(GestureID.THUMB_UP, 0.8),
+            GesturePrediction.unknown("motion_gap"),
+            GesturePrediction(GestureID.THUMB_UP, 0.6),
+            GesturePrediction.unknown("motion_gap"),
+        ]
+    )
+
+    assert prediction.gesture_id == GestureID.THUMB_UP
+    assert abs(prediction.confidence - 0.7) < 1e-9
+
+
+def test_stable_static_prediction_accepts_sparse_known_consensus() -> None:
+    prediction = _stable_static_prediction(
+        [
+            GesturePrediction(GestureID.INDEX_LEFT, 0.7),
+            GesturePrediction.unknown("motion_gap"),
+            GesturePrediction.unknown("motion_gap"),
+            GesturePrediction(GestureID.INDEX_LEFT, 0.8),
+            GesturePrediction.unknown("motion_gap"),
+            GesturePrediction(GestureID.INDEX_LEFT, 0.6),
+            GesturePrediction.unknown("motion_gap"),
+        ]
+    )
+
+    assert prediction.gesture_id == GestureID.INDEX_LEFT
+    assert abs(prediction.confidence - 0.7) < 1e-9
+
+
+def test_stable_static_prediction_rejects_unstable_known_votes() -> None:
+    prediction = _stable_static_prediction(
+        [
+            GesturePrediction(GestureID.OPEN_PALM, 0.8),
+            GesturePrediction(GestureID.OPEN_PALM, 0.7),
+            GesturePrediction(GestureID.FIST, 0.9),
+            GesturePrediction(GestureID.FIST, 0.8),
+            GesturePrediction.unknown("motion_gap"),
+        ]
+    )
+
+    assert prediction.gesture_id == GestureID.UNKNOWN
+    assert prediction.metadata == {"reason": "unstable_pipeline_static_prediction"}
+
+
+def test_full_dynamic_sequence_aggregation_uses_entire_landmark_sequence() -> None:
+    evaluator = SampleEvaluator.__new__(SampleEvaluator)
+    classifier = _RecordingDynamicClassifier()
+    evaluator._dynamic_classifier = classifier
+
+    prediction, _latency_ms, _fps, frame_count, note = (
+        evaluator._evaluate_landmark_dynamic_full([_landmark_frame(index) for index in range(40)])
+    )
+
+    assert prediction.gesture_id == GestureID.PULL_TOWARD
+    assert frame_count == 40
+    assert note == "full_dynamic_sequence"
+    assert classifier.seen_lengths == [40]
+
+
+class _RecordingDynamicClassifier:
+    def __init__(self) -> None:
+        self.seen_lengths: list[int] = []
+
+    def classify(self, buffer: TrajectoryBuffer) -> GesturePrediction:
+        self.seen_lengths.append(len(buffer))
+        return GesturePrediction(GestureID.PULL_TOWARD, 0.9)
+
+
+def _landmark_frame(index: int) -> list[tuple[float, float, float]]:
+    offset = index * 0.001
+    landmarks = [(offset, 0.0, 0.0) for _ in range(21)]
+    landmarks[0] = (offset, 0.0, 0.0)
+    landmarks[5] = (offset - 0.1, -0.1, 0.0)
+    landmarks[8] = (offset - 0.1, -0.4, 0.0)
+    landmarks[9] = (offset, -0.1, 0.0)
+    landmarks[12] = (offset, -0.4, 0.0)
+    landmarks[17] = (offset + 0.1, -0.1, 0.0)
+    landmarks[20] = (offset + 0.1, -0.4, 0.0)
+    return landmarks

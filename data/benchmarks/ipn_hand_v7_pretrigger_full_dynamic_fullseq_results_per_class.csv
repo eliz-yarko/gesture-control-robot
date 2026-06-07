@@ -1,0 +1,4 @@
+group,label,support,predicted,true_positive,false_positive,false_negative,precision,recall,f1
+ALL,UNKNOWN,30,40,21,19,9,0.525,0.7,0.6
+ALL,WAVE_LR,30,30,17,13,13,0.5666666666666667,0.5666666666666667,0.5666666666666667
+ALL,PULL_TOWARD,30,20,18,2,12,0.9,0.6,0.7200000000000001

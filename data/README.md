@@ -79,6 +79,89 @@ python scripts/benchmark.py `
   --output data/benchmarks/results.csv
 ```
 
+## Independent control/holdout split workflow
+
+Do not use augmentation or derived landmark windows as independent control/holdout samples.
+When a compatible external subset is available as class-named folders, first build one source
+manifest and then split it with group-safe stratification:
+
+```powershell
+python scripts/build_manifest.py `
+  --input data/external/hagrid_v2_subset `
+  --dataset hagrid_v2 `
+  --output data/processed/benchmark_inputs/hagrid_v2_subset_manifest.csv `
+  --condition external_static `
+  --distance unknown `
+  --limit-per-class 40 `
+  --include-unknown
+
+python scripts/split_manifest.py `
+  --input data/processed/benchmark_inputs/hagrid_v2_subset_manifest.csv `
+  --train-output data/processed/training/hagrid_v2_subset_train_manifest.csv `
+  --control-output data/processed/benchmark_inputs/hagrid_v2_subset_control_manifest.csv `
+  --holdout-output data/processed/benchmark_inputs/hagrid_v2_subset_holdout_manifest.csv `
+  --control-count 150 `
+  --holdout-count 70 `
+  --seed 42
+```
+
+The splitter keeps each `sample_id` group in only one split. If the source subset is too small
+for both requested targets, the shortfall is shared between control and holdout instead of
+starving holdout. The current local own-control data has only 96 valid cached landmark samples,
+so an external compatible subset is still required to reach the 120-150+ control and 56-70+
+holdout targets without leaking train-derived examples into evaluation.
+
+For the HaGRID 30k 384p sample zip, extract only compatible static classes first:
+
+```powershell
+python scripts/extract_hagrid_zip_subset.py `
+  --zip data/external/hagrid-sample-30k-384p.zip `
+  --output-root data/external/hagrid_static_subset/all `
+  --class call `
+  --class palm `
+  --class fist `
+  --class like `
+  --class dislike `
+  --class peace `
+  --class three `
+  --class ok `
+  --limit-per-class 140 `
+  --seed 42
+```
+
+The current extracted subset has 1120 raw images across eight mapped labels. After landmark
+filtering, it provides 295 train, 144 control, and 78 holdout valid samples. The tuned v10
+own+HaGRID static candidate reaches HaGRID holdout accuracy `0.885` and macro F1 `0.905`,
+but it remains an ablation rather than a live replacement because it still causes one false
+`THUMB_DOWN` command on the own dense-valid control set.
+
+The safer runtime candidate keeps the stable v3 own-control static model as primary and uses
+the tuned v10 static model only as a low-confidence fallback:
+
+```powershell
+python scripts/evaluate_manifest.py `
+  --manifest data/processed/benchmark_inputs/own_control_test_landmarks_dense_valid_manifest.csv `
+  --output data/benchmarks/own_control_static_v3_primary_v10_tuned_fallback_p040_dynamic_v3_wave038_pipeline_dense_valid_predictions.csv `
+  --classifier-mode pipeline `
+  --static-model models/static_gesture_classifier_windowed_v3_open_ipn_min5.joblib `
+  --secondary-static-model models/static_gesture_classifier_windowed_v10_own_hagrid_static.joblib `
+  --secondary-static-threshold-profile models/hagrid_static_v10_safety_threshold_profile.json `
+  --primary-static-min-confidence 0.4 `
+  --dynamic-model models/dynamic_gesture_classifier_windowed_v3_open_ipn_min5.joblib `
+  --dynamic-threshold-profile models/dynamic_v3_wave_lr_safety_threshold_profile.json `
+  --frame-stride 1 `
+  --max-frames 120 `
+  --frame-width 480 `
+  --frame-height 640 `
+  --mirror-frame
+```
+
+This ensemble preserves the own dense-valid result (`accuracy=0.952`, `macro-F1=0.972`,
+false confirmed command rate `0.000`) while keeping the HaGRID static subset at the tuned
+v10 level (`control accuracy=0.868`, `holdout accuracy=0.885`). The current own holdout has
+only 31 valid landmark samples and reaches `accuracy=0.871`, so it is one correct prediction
+below `0.875` and still below the requested 56-70+ independent holdout count.
+
 ## Landmark cache workflow
 
 For iterative training, export landmarks once and train/evaluate on JSON sequences instead of
@@ -88,56 +171,38 @@ running MediaPipe on every experiment:
 python scripts/export_landmark_manifest.py `
   --manifest data/processed/benchmark_inputs/own_control_train_manifest.csv `
   --output-manifest data/processed/benchmark_inputs/own_control_train_landmarks_manifest.csv `
-  --output-dir data/processed/benchmark_inputs/own_control_train_landmarks `
-  --frame-stride 8 `
-  --max-frames 24 `
+  --output-dir data/processed/benchmark_inputs/own_control_train_landmarks_dense `
+  --frame-stride 1 `
+  --max-frames 120 `
   --frame-width 480 `
   --frame-height 640 `
   --mirror-frame `
   --continue-on-error
 
-python scripts/train_gesture_models.py `
-  --manifest data/processed/benchmark_inputs/own_control_train_landmarks_manifest.csv `
-  --static-output models/static_gesture_classifier_windowed.joblib `
-  --dynamic-output models/dynamic_gesture_classifier_windowed.joblib `
-  --min-dynamic-window-points 5 `
-  --static-min-confidence 0.25 `
-  --dynamic-min-confidence 0.25
+python scripts/export_landmark_manifest.py `
+  --manifest data/processed/benchmark_inputs/own_control_test_manifest.csv `
+  --output-manifest data/processed/benchmark_inputs/own_control_test_landmarks_dense_manifest.csv `
+  --output-dir data/processed/benchmark_inputs/own_control_test_landmarks_dense `
+  --frame-stride 1 `
+  --max-frames 120 `
+  --frame-width 480 `
+  --frame-height 640 `
+  --mirror-frame `
+  --continue-on-error
 ```
 
-Remove technically invalid cached rows before final training and evaluation. A cached video row
-is invalid for this protocol when MediaPipe produced fewer landmark frames than the minimum
-dynamic window (`5` here), because the classifier has too little hand evidence to learn from or
-benchmark against:
+The dense cache keeps all own-control videos in the training/evaluation protocol. The older
+`min5` filtered manifests are useful only as a diagnostic slice: they remove samples where
+MediaPipe initially produced too few landmarks, but they should not be treated as the final
+own-data result because they hide difficult local videos.
 
-```powershell
-python scripts/filter_manifest.py `
-  --input data/processed/benchmark_inputs/own_control_train_landmarks_manifest.csv `
-  --output data/processed/benchmark_inputs/own_control_train_landmarks_min5_manifest.csv `
-  --min-frame-count 5
-
-python scripts/filter_manifest.py `
-  --input data/processed/benchmark_inputs/own_control_test_landmarks_manifest.csv `
-  --output data/processed/benchmark_inputs/own_control_test_landmarks_min5_manifest.csv `
-  --min-frame-count 5
-```
-
-For the current own-control split this excludes thirteen cached rows:
-
-- train: `own_control_circle_0002`, `own_control_circle_0009`, `own_control_peace_0002`,
-  `own_control_pinky_0007`, `own_control_pull_toward_0003`,
-  `own_control_three_fingers_0005`, `own_control_unknown_0003`, `own_control_unknown_0006`,
-  `own_control_unknown_0009`
-- test: `own_control_peace_0004`, `own_control_peace_0009`,
-  `own_control_three_fingers_0004`, `own_control_unknown_0008`
-
-Train and evaluate the filtered v3 landmark models:
+Train and evaluate the dense v3 landmark models:
 
 ```powershell
 python scripts/train_gesture_models.py `
-  --manifest data/processed/benchmark_inputs/own_control_train_landmarks_min5_manifest.csv `
-  --static-output models/static_gesture_classifier_windowed_v3_min5.joblib `
-  --dynamic-output models/dynamic_gesture_classifier_windowed_v3_min5.joblib `
+  --manifest data/processed/benchmark_inputs/own_control_train_landmarks_dense_manifest.csv `
+  --static-output models/static_gesture_classifier_windowed_v3_dense.joblib `
+  --dynamic-output models/dynamic_gesture_classifier_windowed_v3_dense.joblib `
   --frame-stride 1 `
   --max-frames 120 `
   --static-min-confidence 0.25 `
@@ -147,31 +212,33 @@ python scripts/train_gesture_models.py `
   --dynamic-augmentation-copies 2
 
 python scripts/evaluate_manifest.py `
-  --manifest data/processed/benchmark_inputs/own_control_test_landmarks_min5_manifest.csv `
-  --output data/processed/benchmark_inputs/own_control_windowed_v3_min5_test_predictions.csv `
+  --manifest data/processed/benchmark_inputs/own_control_test_landmarks_dense_manifest.csv `
+  --output data/processed/benchmark_inputs/own_control_windowed_v3_dense40_test_predictions.csv `
   --classifier-mode auto `
-  --static-model models/static_gesture_classifier_windowed_v3_min5.joblib `
-  --dynamic-model models/dynamic_gesture_classifier_windowed_v3_min5.joblib `
+  --static-model models/static_gesture_classifier_windowed_v3_dense.joblib `
+  --dynamic-model models/dynamic_gesture_classifier_windowed_v3_dense.joblib `
   --dynamic-min-points 5 `
+  --max-frames 40 `
   --fallback-to-heuristics `
   --continue-on-error
 
 python scripts/benchmark.py `
-  --input data/processed/benchmark_inputs/own_control_windowed_v3_min5_test_predictions.csv `
-  --output data/benchmarks/own_control_windowed_v3_min5_test_results.csv
+  --input data/processed/benchmark_inputs/own_control_windowed_v3_dense40_test_predictions.csv `
+  --output data/benchmarks/own_control_windowed_v3_dense40_test_results.csv
 
 python scripts/tune_thresholds.py `
-  --input data/processed/benchmark_inputs/own_control_windowed_v3_min5_test_predictions.csv `
-  --output models/own_control_windowed_v3_min5_threshold_profile.json `
+  --input data/processed/benchmark_inputs/own_control_windowed_v3_dense40_test_predictions.csv `
+  --output models/own_control_windowed_v3_dense40_threshold_profile.json `
   --default-threshold 0.25 `
   --max-critical-fpr 0 `
   --step 0.05
 ```
 
-Current min5 own-control benchmark with temporal v3 features: raw macro F1 is `0.875`,
-accuracy is `0.850`, critical false-positive rate is `0.053`. With the tuned threshold
-profile, macro F1 is `0.889`, accuracy is `0.900`, critical false-positive rate is `0.000`,
-and unknown rate is `0.150`.
+Current dense own-control benchmark with temporal v3 features uses all 24 test videos:
+raw macro F1 is `0.700`, accuracy is `0.667`, unknown rate is `0.125`, and critical
+false-positive rate is `0.087`. The previous `min5` slice reached macro F1 `0.875`
+and accuracy `0.850`, but it excluded difficult own-control videos and should be reported
+as an ablation, not as the only final own-data result.
 
 ## Open-data IPN fine-tuning
 
@@ -237,20 +304,20 @@ python scripts/filter_manifest.py `
   --min-frame-count 5
 ```
 
-Merge the clean own-control train cache with IPN and train the open-data dynamic model:
+Merge the dense own-control train cache with IPN and train the open-data dynamic model:
 
 ```powershell
 python scripts/retrain_open_data.py `
-  --extra-manifest data/processed/benchmark_inputs/own_control_train_landmarks_min5_manifest.csv `
+  --extra-manifest data/processed/benchmark_inputs/own_control_train_landmarks_dense_manifest.csv `
   --extra-manifest data/processed/training/ipn_hand_train_landmarks_min5_manifest.csv `
-  --output-manifest data/processed/training/combined_own_ipn_landmarks_min5_manifest.csv `
+  --output-manifest data/processed/training/combined_own_dense_ipn_landmarks_manifest.csv `
   --include-unknown `
   --skip-train
 
 python scripts/train_gesture_models.py `
-  --manifest data/processed/training/combined_own_ipn_landmarks_min5_manifest.csv `
-  --static-output models/static_gesture_classifier_windowed_v3_open_ipn_min5.joblib `
-  --dynamic-output models/dynamic_gesture_classifier_windowed_v3_open_ipn_min5.joblib `
+  --manifest data/processed/training/combined_own_dense_ipn_landmarks_manifest.csv `
+  --static-output models/static_gesture_classifier_windowed_v3_dense_open_ipn.joblib `
+  --dynamic-output models/dynamic_gesture_classifier_windowed_v3_dense_open_ipn.joblib `
   --frame-stride 1 `
   --max-frames 120 `
   --static-min-confidence 0.25 `
@@ -260,10 +327,10 @@ python scripts/train_gesture_models.py `
   --dynamic-augmentation-copies 2
 ```
 
-The deployed default is a hybrid: keep `static_gesture_classifier_windowed_v3_min5.joblib`
-for static gestures and use `dynamic_gesture_classifier_windowed_v3_open_ipn_min5.joblib`
-for dynamic gestures, with
-`own_control_windowed_v3_open_ipn_min5_hybrid_threshold_profile.json`.
+This open-data model is kept as a benchmark/fine-tuning candidate, not as the
+live default. The live demo should use the stable own-control models
+`static_gesture_classifier.joblib` and `dynamic_gesture_classifier.joblib`
+unless an experiment explicitly passes different model paths.
 
 Benchmarks from this run:
 

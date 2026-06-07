@@ -1,0 +1,47 @@
+{
+  "baseline": {
+    "accuracy": 0.8787878787878788,
+    "critical_false_positive_rate": 0.034013605442176874,
+    "macro_f1": 0.8614519533547873,
+    "macro_precision": 0.8535337211807801,
+    "macro_recall": 0.887876743139901,
+    "mean_fps": 9.195763084912514,
+    "mean_latency_ms": 120.11139132577642,
+    "min_fps": 6.635055221534153,
+    "p95_latency_ms": 272.45819941163063,
+    "sample_count": 165,
+    "unknown_rate": 0.1393939393939394,
+    "weighted_f1": 0.8778686834607887
+  },
+  "class_thresholds": {
+    "CIRCLE": 0.25,
+    "FIST": 0.25,
+    "INDEX_LEFT": 0.25,
+    "INDEX_RIGHT": 0.29,
+    "OK_SIGN": 0.25,
+    "OPEN_PALM": 0.25,
+    "PEACE": 0.3,
+    "PINKY": 0.25,
+    "PULL_TOWARD": 0.25,
+    "THREE_FINGERS": 0.385,
+    "THUMB_DOWN": 0.855,
+    "THUMB_UP": 0.28,
+    "WAVE_LR": 0.355
+  },
+  "min_confidence": 0.25,
+  "source": "data\\benchmarks\\combined_static_v11_ownrw6_control_for_thresholds.csv",
+  "tuned": {
+    "accuracy": 0.8242424242424242,
+    "critical_false_positive_rate": 0.0,
+    "macro_f1": 0.8962279100210134,
+    "macro_precision": 0.9904198365736827,
+    "macro_recall": 0.8451417004048583,
+    "mean_fps": 9.195763084912514,
+    "mean_latency_ms": 120.11139132577642,
+    "min_fps": 6.635055221534153,
+    "p95_latency_ms": 272.45819941163063,
+    "sample_count": 165,
+    "unknown_rate": 0.2909090909090909,
+    "weighted_f1": 0.865191356642506
+  }
+}

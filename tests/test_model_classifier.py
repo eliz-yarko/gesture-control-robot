@@ -10,6 +10,7 @@ from src.recognition.landmark_features import (
     extract_trajectory_features,
 )
 from src.recognition.model_classifier import (
+    ConfidenceFallbackStaticGestureClassifier,
     FallbackDynamicGestureClassifier,
     FallbackStaticGestureClassifier,
     ModelBundle,
@@ -101,6 +102,46 @@ def test_fallback_static_classifier_uses_rules_after_low_confidence_model() -> N
 
     assert prediction.gesture_id == GestureID.OPEN_PALM
     assert prediction.metadata["fallback_after"] == "model_confidence_below_threshold"
+
+
+def test_confidence_fallback_static_classifier_keeps_strong_primary() -> None:
+    classifier = ConfidenceFallbackStaticGestureClassifier(
+        primary=_ConstantClassifier(GesturePrediction(GestureID.THUMB_UP, 0.8)),
+        fallback=_ConstantClassifier(GesturePrediction(GestureID.THUMB_DOWN, 0.95)),
+        primary_min_confidence=0.7,
+    )
+
+    prediction = classifier.classify(_open_palm_landmarks())
+
+    assert prediction.gesture_id == GestureID.THUMB_UP
+    assert "fallback_after" not in prediction.metadata
+
+
+def test_confidence_fallback_static_classifier_uses_secondary_for_weak_primary() -> None:
+    classifier = ConfidenceFallbackStaticGestureClassifier(
+        primary=_ConstantClassifier(GesturePrediction(GestureID.THUMB_UP, 0.4)),
+        fallback=_ConstantClassifier(GesturePrediction(GestureID.OPEN_PALM, 0.9)),
+        primary_min_confidence=0.7,
+    )
+
+    prediction = classifier.classify(_open_palm_landmarks())
+
+    assert prediction.gesture_id == GestureID.OPEN_PALM
+    assert prediction.metadata["primary_gesture"] == "THUMB_UP"
+    assert prediction.metadata["primary_confidence"] == 0.4
+
+
+def test_confidence_fallback_static_classifier_uses_secondary_after_unknown() -> None:
+    classifier = ConfidenceFallbackStaticGestureClassifier(
+        primary=_ConstantClassifier(GesturePrediction.unknown("model_unknown")),
+        fallback=_ConstantClassifier(GesturePrediction(GestureID.FIST, 0.75)),
+        primary_min_confidence=0.7,
+    )
+
+    prediction = classifier.classify(_open_palm_landmarks())
+
+    assert prediction.gesture_id == GestureID.FIST
+    assert prediction.metadata["fallback_after"] == "model_unknown"
 
 
 def test_dynamic_model_classifier_uses_trajectory_features() -> None:
@@ -321,6 +362,14 @@ class _FakeModel:
     def predict_proba(self, features: list[tuple[float, ...]]) -> list[tuple[float, ...]]:
         assert features
         return [self._probabilities]
+
+
+class _ConstantClassifier:
+    def __init__(self, prediction: GesturePrediction) -> None:
+        self._prediction = prediction
+
+    def classify(self, raw_landmarks: object) -> GesturePrediction:
+        return self._prediction
 
 
 class _FakeDynamicClassifier:

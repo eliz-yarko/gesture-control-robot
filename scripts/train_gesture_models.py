@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import math
 import random
 import sys
 from collections import Counter, defaultdict
@@ -53,6 +54,7 @@ class GestureModelTrainer:
         max_frames: int | None,
         min_dynamic_window_points: int,
         dynamic_augmentation_copies: int,
+        dynamic_positive_min_window_ratio: float,
         random_state: int,
     ) -> None:
         """Initialize reusable OpenCV and MediaPipe resources."""
@@ -62,6 +64,7 @@ class GestureModelTrainer:
         self._max_frames = max_frames
         self._min_dynamic_window_points = min_dynamic_window_points
         self._dynamic_augmentation_copies = dynamic_augmentation_copies
+        self._dynamic_positive_min_window_ratio = dynamic_positive_min_window_ratio
         self._random_state = random_state
         self._cv2 = importlib.import_module("cv2")
         self._detector = HandDetector(config.hand_detection)
@@ -98,7 +101,7 @@ class GestureModelTrainer:
 
         for sample in samples:
             label = normalize_label(sample.expected_gesture)
-            target_label = label if _is_dynamic_label(label) else GestureID.UNKNOWN.name
+            is_dynamic_sample = _is_dynamic_label(label)
             points = self._extract_trajectory_points(sample)
             if len(points) < self._min_dynamic_window_points:
                 continue
@@ -109,6 +112,14 @@ class GestureModelTrainer:
                     min_size=self._min_dynamic_window_points,
                 )
             ):
+                target_label = _dynamic_window_label(
+                    label,
+                    is_dynamic_sample=is_dynamic_sample,
+                    window_size=len(window),
+                    full_size=len(points),
+                    positive_min_window_ratio=self._dynamic_positive_min_window_ratio,
+                    min_size=self._min_dynamic_window_points,
+                )
                 for augmented_window in _augmented_trajectory_windows(
                     window,
                     copies=self._dynamic_augmentation_copies,
@@ -240,6 +251,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Deterministic jittered copies to add for each dynamic trajectory window.",
     )
+    parser.add_argument(
+        "--dynamic-positive-min-window-ratio",
+        type=float,
+        default=0.0,
+        help=(
+            "When > 0, derived windows from dynamic samples shorter than this fraction "
+            "of the full trajectory are labeled UNKNOWN for train-only pretrigger control."
+        ),
+    )
     return parser
 
 
@@ -255,6 +275,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--min-dynamic-window-points must be positive")
     if args.dynamic_augmentation_copies < 0:
         raise ValueError("--dynamic-augmentation-copies must be non-negative")
+    if args.dynamic_positive_min_window_ratio < 0.0 or args.dynamic_positive_min_window_ratio > 1.0:
+        raise ValueError("--dynamic-positive-min-window-ratio must be in [0, 1]")
 
     samples = read_manifest(Path(args.manifest))
     config = AppConfig(
@@ -270,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_frames=args.max_frames,
         min_dynamic_window_points=args.min_dynamic_window_points,
         dynamic_augmentation_copies=args.dynamic_augmentation_copies,
+        dynamic_positive_min_window_ratio=args.dynamic_positive_min_window_ratio,
         random_state=args.random_state,
     )
     try:
@@ -501,6 +524,24 @@ def _window_starts(point_count: int, size: int) -> list[int]:
         return [0]
     last_start = point_count - size
     return sorted({0, last_start // 2, last_start})
+
+
+def _dynamic_window_label(
+    label: str,
+    *,
+    is_dynamic_sample: bool,
+    window_size: int,
+    full_size: int,
+    positive_min_window_ratio: float,
+    min_size: int,
+) -> str:
+    if not is_dynamic_sample:
+        return GestureID.UNKNOWN.name
+    if positive_min_window_ratio <= 0.0:
+        return label
+
+    positive_min_size = max(min_size, math.ceil(full_size * positive_min_window_ratio))
+    return label if window_size >= positive_min_size else GestureID.UNKNOWN.name
 
 
 def _is_static_or_unknown(label: str) -> bool:

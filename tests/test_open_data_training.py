@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.retrain_open_data import build_open_data_manifest, build_parser
 from scripts.train_gesture_models import (
     _augmented_trajectory_windows,
+    _dynamic_window_label,
     _extract_landmark_frames,
     _jitter_trajectory_window,
     _trajectory_windows,
@@ -60,6 +61,31 @@ def test_dynamic_augmentation_adds_deterministic_jittered_windows() -> None:
     assert windows[1] == _jitter_trajectory_window(
         points,
         random.Random("42:sample:0:0"),
+    )
+
+
+def test_dynamic_window_label_marks_short_dynamic_prefixes_unknown() -> None:
+    assert (
+        _dynamic_window_label(
+            "WAVE_LR",
+            is_dynamic_sample=True,
+            window_size=5,
+            full_size=20,
+            positive_min_window_ratio=0.6,
+            min_size=5,
+        )
+        == "UNKNOWN"
+    )
+    assert (
+        _dynamic_window_label(
+            "WAVE_LR",
+            is_dynamic_sample=True,
+            window_size=12,
+            full_size=20,
+            positive_min_window_ratio=0.6,
+            min_size=5,
+        )
+        == "WAVE_LR"
     )
 
 
@@ -132,3 +158,9 @@ def test_open_data_parser_accepts_dynamic_augmentation_copies() -> None:
     args = build_parser().parse_args(["--dynamic-augmentation-copies", "2"])
 
     assert args.dynamic_augmentation_copies == 2
+
+
+def test_open_data_parser_accepts_dynamic_positive_min_window_ratio() -> None:
+    args = build_parser().parse_args(["--dynamic-positive-min-window-ratio", "0.65"])
+
+    assert args.dynamic_positive_min_window_ratio == 0.65

@@ -19,12 +19,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.capture.video_capture import CapturedFrame  # noqa: E402
-from src.config import AppConfig, VideoConfig  # noqa: E402
+from src.config import AppConfig, CommandMappingConfig, VideoConfig  # noqa: E402
 from src.domain import GestureID, GesturePrediction  # noqa: E402
 from src.evaluation import EvaluationSample, PredictionRecord, read_manifest  # noqa: E402
 from src.evaluation.manifest import write_prediction_records  # noqa: E402
 from src.pipeline import GestureControlPipeline  # noqa: E402
 from src.recognition import (
+    ConfidenceFallbackStaticGestureClassifier,
     DynamicGestureClassifier,
     FallbackDynamicGestureClassifier,
     FallbackStaticGestureClassifier,
@@ -34,6 +35,7 @@ from src.recognition import (
     StaticGestureClassifier,
     load_threshold_profile,
 )  # noqa: E402
+from src.recognition.hand_detector import HandDetection  # noqa: E402
 from src.recognition.trajectory_buffer import TrajectoryBuffer  # noqa: E402
 from src.utils.geometry import Landmark  # noqa: E402
 from src.utils.metrics import normalize_label  # noqa: E402
@@ -50,10 +52,14 @@ class SampleEvaluator:
         max_frames: int | None,
         mirror_frame: bool,
         static_model: Path | None = None,
+        secondary_static_model: Path | None = None,
         dynamic_model: Path | None = None,
         static_threshold_profile: Path | None = None,
+        secondary_static_threshold_profile: Path | None = None,
         dynamic_threshold_profile: Path | None = None,
+        primary_static_min_confidence: float = 0.0,
         dynamic_min_points: int | None = None,
+        dynamic_sequence_aggregation: str = "rolling-best",
         fallback_to_heuristics: bool = False,
     ) -> None:
         """Initialize reusable detector and classifier objects."""
@@ -63,12 +69,16 @@ class SampleEvaluator:
         self._frame_stride = frame_stride
         self._max_frames = max_frames
         self._mirror_frame = mirror_frame
+        self._dynamic_sequence_aggregation = dynamic_sequence_aggregation
         self._cv2 = importlib.import_module("cv2")
         self._detector = HandDetector(config.hand_detection)
         self._static_classifier = _build_static_classifier(
             config,
             static_model,
+            secondary_static_model,
             static_threshold_profile,
+            secondary_static_threshold_profile,
+            primary_static_min_confidence,
             fallback_to_heuristics,
         )
         self._dynamic_classifier = _build_dynamic_classifier(
@@ -217,6 +227,7 @@ class SampleEvaluator:
         )
         command_predictions: list[GesturePrediction] = []
         selected_predictions: list[GesturePrediction] = []
+        static_predictions: list[GesturePrediction] = []
         processed_frames = 0
         decoded_frames = 0
         started_at = perf_counter()
@@ -246,6 +257,7 @@ class SampleEvaluator:
                 )
                 processed_frames += 1
                 selected_predictions.append(result.selected_prediction)
+                static_predictions.append(result.static_prediction)
                 if result.command_event is not None:
                     command_predictions.append(
                         GesturePrediction(
@@ -254,6 +266,14 @@ class SampleEvaluator:
                             metadata={"source": "command_event"},
                         )
                     )
+            if processed_frames:
+                self._flush_pipeline_end(
+                    pipeline,
+                    selected_predictions,
+                    command_predictions,
+                    static_predictions,
+                    start_frame_index=processed_frames,
+                )
         finally:
             capture.release()
 
@@ -262,12 +282,12 @@ class SampleEvaluator:
             return GesturePrediction.unknown("empty_video"), None, None, 0, "empty_video"
 
         if command_predictions:
-            prediction = _majority_prediction(command_predictions)
+            prediction = command_predictions[-1]
             note = "confirmed_command"
         else:
-            prediction = _majority_prediction(selected_predictions)
+            prediction = _stable_static_prediction(static_predictions)
             note = (
-                "selected_prediction_without_command"
+                "stable_static_prediction_without_command"
                 if prediction.gesture_id != GestureID.UNKNOWN
                 else "no_pipeline_prediction"
             )
@@ -288,6 +308,11 @@ class SampleEvaluator:
         frames = _extract_landmark_frames(payload)
         if not frames:
             return GesturePrediction.unknown("empty_landmarks"), None, None, 0, "empty_landmarks"
+        if self._classifier_mode == "pipeline":
+            return self._evaluate_landmark_pipeline(frames)
+        frames = frames[: self._max_frames]
+        if self._classifier_mode == "dynamic" and self._dynamic_sequence_aggregation == "full":
+            return self._evaluate_landmark_dynamic_full(frames)
 
         if len(frames) == 1:
             started_at = perf_counter()
@@ -300,7 +325,7 @@ class SampleEvaluator:
         buffer = TrajectoryBuffer(self._config.dynamic_classifier.buffer_size)
         started_at = perf_counter()
 
-        for frame in frames[: self._max_frames]:
+        for frame in frames:
             static_predictions.append(self._static_classifier.classify(frame))
             buffer.add_landmarks(frame)
             dynamic_predictions.append(self._dynamic_classifier.classify(buffer))
@@ -320,6 +345,117 @@ class SampleEvaluator:
             processed_frames,
             note,
         )
+
+    def _evaluate_landmark_dynamic_full(
+        self,
+        frames: Sequence[list[Landmark]],
+    ) -> tuple[GesturePrediction, float | None, float | None, int, str]:
+        started_at = perf_counter()
+        buffer = TrajectoryBuffer(max(len(frames), 1))
+        for frame in frames:
+            buffer.add_landmarks(frame)
+        prediction = self._dynamic_classifier.classify(buffer)
+        elapsed_seconds = perf_counter() - started_at
+        processed_frames = len(frames)
+        note = "full_dynamic_sequence" if prediction.gesture_id != GestureID.UNKNOWN else (
+            "no_sequence_prediction"
+        )
+        return (
+            prediction,
+            (elapsed_seconds * 1000) / processed_frames if processed_frames else None,
+            processed_frames / elapsed_seconds if elapsed_seconds > 0 else None,
+            processed_frames,
+            note,
+        )
+
+    def _evaluate_landmark_pipeline(
+        self,
+        frames: Sequence[list[Landmark]],
+    ) -> tuple[GesturePrediction, float | None, float | None, int, str]:
+        detector = _LandmarkSequenceDetector(frames[: self._max_frames])
+        pipeline = GestureControlPipeline(
+            config=self._config,
+            detector=detector,
+            static_classifier=self._static_classifier,
+            dynamic_classifier=self._dynamic_classifier,
+        )
+        command_predictions: list[GesturePrediction] = []
+        selected_predictions: list[GesturePrediction] = []
+        static_predictions: list[GesturePrediction] = []
+        started_at = perf_counter()
+        processed_frames = 0
+
+        for index, _frame_landmarks in enumerate(frames[: self._max_frames]):
+            result = pipeline.process(
+                CapturedFrame(
+                    bgr_frame=None,
+                    rgb_frame=None,
+                    index=index,
+                    timestamp=index / max(self._config.video.target_fps, 1),
+                )
+            )
+            processed_frames += 1
+            selected_predictions.append(result.selected_prediction)
+            static_predictions.append(result.static_prediction)
+            if result.command_event is not None:
+                command_predictions.append(
+                    GesturePrediction(
+                        gesture_id=result.command_event.gesture_id,
+                        confidence=result.command_event.confidence,
+                        metadata={"source": "command_event"},
+                    )
+                )
+        if processed_frames:
+            self._flush_pipeline_end(
+                pipeline,
+                selected_predictions,
+                command_predictions,
+                static_predictions,
+                start_frame_index=processed_frames,
+            )
+
+        elapsed_seconds = perf_counter() - started_at
+        if command_predictions:
+            prediction = command_predictions[-1]
+            note = "confirmed_command"
+        else:
+            prediction = _stable_static_prediction(static_predictions)
+            note = (
+                "stable_static_prediction_without_command"
+                if prediction.gesture_id != GestureID.UNKNOWN
+                else "no_pipeline_prediction"
+            )
+        return (
+            prediction,
+            (elapsed_seconds * 1000) / processed_frames if processed_frames else None,
+            processed_frames / elapsed_seconds if elapsed_seconds > 0 else None,
+            processed_frames,
+            note,
+        )
+
+    def _flush_pipeline_end(
+        self,
+        pipeline: GestureControlPipeline,
+        selected_predictions: list[GesturePrediction],
+        command_predictions: list[GesturePrediction],
+        static_predictions: list[GesturePrediction],
+        *,
+        start_frame_index: int,
+    ) -> None:
+        flush_frames = max(1, self._config.command_mapping.dynamic_confirmation_frames)
+        for offset in range(flush_frames):
+            result = pipeline.flush(start_frame_index + offset)
+            selected_predictions.append(result.selected_prediction)
+            static_predictions.append(result.static_prediction)
+            if result.command_event is None:
+                continue
+            command_predictions.append(
+                GesturePrediction(
+                    gesture_id=result.command_event.gesture_id,
+                    confidence=result.command_event.confidence,
+                    metadata={"source": "command_event", "flush": True},
+                )
+            )
 
     def _prepare_video_frame(self, frame: Any) -> Any:
         resized = self._cv2.resize(
@@ -343,6 +479,24 @@ class SampleEvaluator:
         if mode == "static":
             return _majority_prediction(static_predictions)
         return _best_prediction([*static_predictions, *dynamic_predictions])
+
+
+class _LandmarkSequenceDetector:
+    """Pipeline detector adapter for cached landmark JSON sequences."""
+
+    def __init__(self, frames: Sequence[list[Landmark]]) -> None:
+        self._frames = frames
+        self._index = 0
+
+    def detect(self, rgb_frame: object) -> list[HandDetection]:
+        if self._index >= len(self._frames):
+            return []
+        landmarks = self._frames[self._index]
+        self._index += 1
+        return [HandDetection(landmarks=landmarks, handedness="Right", score=1.0)]
+
+    def close(self) -> None:
+        return None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -377,6 +531,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional joblib model for static gesture classification.",
     )
     parser.add_argument(
+        "--secondary-static-model",
+        type=str,
+        default=None,
+        help=(
+            "Optional secondary static model used when the primary static model "
+            "is UNKNOWN or below --primary-static-min-confidence."
+        ),
+    )
+    parser.add_argument(
         "--dynamic-model",
         type=str,
         default=None,
@@ -389,10 +552,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSON threshold profile for the static model.",
     )
     parser.add_argument(
+        "--secondary-static-threshold-profile",
+        type=str,
+        default=None,
+        help="Optional JSON threshold profile for the secondary static model.",
+    )
+    parser.add_argument(
         "--dynamic-threshold-profile",
         type=str,
         default=None,
         help="Optional JSON threshold profile for the dynamic model.",
+    )
+    parser.add_argument(
+        "--primary-static-min-confidence",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum primary static confidence required before suppressing the "
+            "secondary static model."
+        ),
     )
     parser.add_argument(
         "--dynamic-min-points",
@@ -401,6 +579,22 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Minimum trajectory points required by the dynamic model. Defaults to "
             "the runtime value max(min_window_points, buffer_size // 3)."
+        ),
+    )
+    parser.add_argument(
+        "--dynamic-confirmation-frames",
+        type=int,
+        default=None,
+        help="Override command-mapper dynamic confirmation frames for pipeline evaluation.",
+    )
+    parser.add_argument(
+        "--dynamic-sequence-aggregation",
+        choices=("rolling-best", "full"),
+        default="rolling-best",
+        help=(
+            "Sequence aggregation for classifier-mode=dynamic on landmark samples. "
+            "'rolling-best' keeps the historical sliding-window behavior; 'full' "
+            "classifies the full landmark sequence as one trajectory."
         ),
     )
     parser.add_argument(
@@ -429,6 +623,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--frame-stride must be positive")
     if args.dynamic_min_points is not None and args.dynamic_min_points <= 0:
         raise ValueError("--dynamic-min-points must be positive when provided")
+    if args.dynamic_confirmation_frames is not None and args.dynamic_confirmation_frames <= 0:
+        raise ValueError("--dynamic-confirmation-frames must be positive when provided")
+    if args.primary_static_min_confidence < 0.0 or args.primary_static_min_confidence > 1.0:
+        raise ValueError("--primary-static-min-confidence must be in [0, 1]")
 
     manifest_path = Path(args.manifest)
     samples = read_manifest(manifest_path)
@@ -437,7 +635,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             frame_width=args.frame_width,
             frame_height=args.frame_height,
             mirror_frame=args.mirror_frame,
-        )
+        ),
+        command_mapping=(
+            CommandMappingConfig(dynamic_confirmation_frames=args.dynamic_confirmation_frames)
+            if args.dynamic_confirmation_frames is not None
+            else CommandMappingConfig()
+        ),
     )
     evaluator = SampleEvaluator(
         config=config,
@@ -446,10 +649,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_frames=args.max_frames,
         mirror_frame=args.mirror_frame,
         static_model=Path(args.static_model) if args.static_model is not None else None,
+        secondary_static_model=(
+            Path(args.secondary_static_model)
+            if args.secondary_static_model is not None
+            else None
+        ),
         dynamic_model=Path(args.dynamic_model) if args.dynamic_model is not None else None,
         static_threshold_profile=(
             Path(args.static_threshold_profile)
             if args.static_threshold_profile is not None
+            else None
+        ),
+        secondary_static_threshold_profile=(
+            Path(args.secondary_static_threshold_profile)
+            if args.secondary_static_threshold_profile is not None
             else None
         ),
         dynamic_threshold_profile=(
@@ -457,7 +670,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.dynamic_threshold_profile is not None
             else None
         ),
+        primary_static_min_confidence=args.primary_static_min_confidence,
         dynamic_min_points=args.dynamic_min_points,
+        dynamic_sequence_aggregation=args.dynamic_sequence_aggregation,
         fallback_to_heuristics=args.fallback_to_heuristics,
     )
     records: list[PredictionRecord] = []
@@ -482,14 +697,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _build_static_classifier(
     config: AppConfig,
     static_model: Path | None,
+    secondary_static_model: Path | None,
     static_threshold_profile: Path | None,
+    secondary_static_threshold_profile: Path | None,
+    primary_static_min_confidence: float,
     fallback_to_heuristics: bool,
 ) -> object:
     fallback = StaticGestureClassifier(config.static_classifier)
     if static_model is None:
         return fallback
 
-    primary = SklearnStaticGestureClassifier.load_path(
+    primary: object = SklearnStaticGestureClassifier.load_path(
         static_model,
         threshold_profile=(
             load_threshold_profile(static_threshold_profile)
@@ -497,6 +715,20 @@ def _build_static_classifier(
             else None
         ),
     )
+    if secondary_static_model is not None:
+        secondary = SklearnStaticGestureClassifier.load_path(
+            secondary_static_model,
+            threshold_profile=(
+                load_threshold_profile(secondary_static_threshold_profile)
+                if secondary_static_threshold_profile is not None
+                else None
+            ),
+        )
+        primary = ConfidenceFallbackStaticGestureClassifier(
+            primary=primary,
+            fallback=secondary,
+            primary_min_confidence=primary_static_min_confidence,
+        )
     if not fallback_to_heuristics:
         return primary
     return FallbackStaticGestureClassifier(primary=primary, fallback=fallback)
@@ -602,6 +834,40 @@ def _majority_prediction(predictions: Sequence[GesturePrediction]) -> GesturePre
     mean_confidence = sum(confidence_by_label[selected_label]) / len(
         confidence_by_label[selected_label]
     )
+    return GesturePrediction(selected_label, mean_confidence)
+
+
+def _stable_static_prediction(
+    predictions: Sequence[GesturePrediction],
+    *,
+    min_vote_share: float = 0.54,
+    min_known_consensus: float = 0.85,
+    min_known_votes: int = 3,
+) -> GesturePrediction:
+    if not predictions:
+        return GesturePrediction.unknown("no_static_predictions")
+
+    known_predictions = [
+        prediction for prediction in predictions if prediction.gesture_id != GestureID.UNKNOWN
+    ]
+    if not known_predictions:
+        return GesturePrediction.unknown("no_known_static_prediction")
+
+    counts = Counter(prediction.gesture_id for prediction in known_predictions)
+    selected_label, selected_count = counts.most_common(1)[0]
+    vote_share = selected_count / len(predictions)
+    known_consensus = selected_count / len(known_predictions)
+    if vote_share < min_vote_share and (
+        selected_count < min_known_votes or known_consensus < min_known_consensus
+    ):
+        return GesturePrediction.unknown("unstable_pipeline_static_prediction")
+
+    confidence_by_label = [
+        prediction.confidence
+        for prediction in known_predictions
+        if prediction.gesture_id == selected_label
+    ]
+    mean_confidence = sum(confidence_by_label) / len(confidence_by_label)
     return GesturePrediction(selected_label, mean_confidence)
 
 

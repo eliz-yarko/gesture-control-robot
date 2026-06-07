@@ -1,0 +1,36 @@
+{
+  "baseline": {
+    "accuracy": 0.627906976744186,
+    "critical_false_positive_rate": 0.0,
+    "macro_f1": 0.6713587487781036,
+    "macro_precision": 0.6322930800542741,
+    "macro_recall": 0.7451352634076887,
+    "mean_fps": 14.774148822148474,
+    "mean_latency_ms": 74.21346361819943,
+    "min_fps": 7.6915737875645,
+    "p95_latency_ms": 99.87748677859891,
+    "sample_count": 129,
+    "unknown_rate": 0.13953488372093023,
+    "weighted_f1": 0.6724552679671895
+  },
+  "class_thresholds": {
+    "PULL_TOWARD": 0.6,
+    "WAVE_LR": 0.45
+  },
+  "min_confidence": 0.25,
+  "source": "data\\processed\\benchmark_inputs\\ipn_hand_cap50_s2_v3_open_ipn_dynamic_predictions.csv",
+  "tuned": {
+    "accuracy": 0.6511627906976745,
+    "critical_false_positive_rate": 0.0,
+    "macro_f1": 0.684869976359338,
+    "macro_precision": 0.6917742706838833,
+    "macro_recall": 0.6884195538680589,
+    "mean_fps": 14.774148822148474,
+    "mean_latency_ms": 74.21346361819943,
+    "min_fps": 7.6915737875645,
+    "p95_latency_ms": 99.87748677859891,
+    "sample_count": 129,
+    "unknown_rate": 0.2868217054263566,
+    "weighted_f1": 0.6851320793503958
+  }
+}

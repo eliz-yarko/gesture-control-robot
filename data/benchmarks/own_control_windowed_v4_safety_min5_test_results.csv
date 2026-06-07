@@ -1,0 +1,2 @@
+group,sample_count,accuracy,macro_precision,macro_recall,macro_f1,weighted_f1,unknown_rate,critical_false_positive_rate,mean_latency_ms,p95_latency_ms,mean_fps,min_fps
+ALL,20,0.8,0.8333333333333334,0.8333333333333334,0.8111111111111112,0.8140350877192982,0.0,0.05263157894736842,214.43299550319347,282.59801425571953,4.90860708684562,3.3631549891268455

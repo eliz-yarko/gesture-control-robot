@@ -53,6 +53,11 @@ DATASET_CLASS_MAPS: dict[str, dict[str, str]] = {
     },
     "hagrid": {
         "no_gesture": "UNKNOWN",
+        "call": "UNKNOWN",
+        "four": "UNKNOWN",
+        "mute": "UNKNOWN",
+        "one": "UNKNOWN",
+        "rock": "UNKNOWN",
         "stop": "OPEN_PALM",
         "palm": "OPEN_PALM",
         "fist": "FIST",
@@ -72,6 +77,11 @@ DATASET_CLASS_MAPS: dict[str, dict[str, str]] = {
     },
     "hagrid_v2": {
         "no_gesture": "UNKNOWN",
+        "call": "UNKNOWN",
+        "four": "UNKNOWN",
+        "mute": "UNKNOWN",
+        "one": "UNKNOWN",
+        "rock": "UNKNOWN",
         "stop": "OPEN_PALM",
         "palm": "OPEN_PALM",
         "fist": "FIST",

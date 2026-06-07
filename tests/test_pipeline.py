@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from src.capture.video_capture import CapturedFrame
 from src.config import AppConfig, CommandMappingConfig, DynamicClassifierConfig
 from src.domain import GestureID, GesturePrediction, RobotCommand
@@ -37,24 +39,6 @@ def test_pipeline_returns_unknown_when_no_hand_detected() -> None:
     assert result.command_event is None
 
 
-def test_pipeline_smooths_short_static_unknown_gap() -> None:
-    pipeline = GestureControlPipeline(
-        detector=_FakeDetector([HandDetection(_open_palm_landmarks(), "Right", 0.95)]),
-        static_classifier=_SequenceStaticClassifier(
-            [
-                GesturePrediction(GestureID.OPEN_PALM, 0.92),
-                GesturePrediction(GestureID.OPEN_PALM, 0.91),
-                GesturePrediction.unknown("model_confidence_below_threshold"),
-            ]
-        ),
-    )
-
-    results = _process_frames(pipeline, 3)
-
-    assert results[-1].static_prediction.gesture_id == GestureID.OPEN_PALM
-    assert results[-1].static_prediction.metadata["smoothed_from"] == "UNKNOWN"
-
-
 def test_pipeline_keeps_emergency_stop_over_dynamic_candidate() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
@@ -78,11 +62,13 @@ def test_pipeline_keeps_emergency_stop_over_dynamic_candidate() -> None:
     assert result.command_event.command == RobotCommand.EMERGENCY_STOP
 
 
-def test_pipeline_suppresses_static_commands_while_dynamic_motion_is_recording() -> None:
+def test_pipeline_keeps_stable_static_command_while_dynamic_motion_is_recording() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
-            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+            ),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -97,15 +83,79 @@ def test_pipeline_suppresses_static_commands_while_dynamic_motion_is_recording()
     results = _process_frames(pipeline, 3)
 
     assert results[-1].dynamic_state == "motion_started"
-    assert results[-1].selected_prediction.gesture_id == GestureID.UNKNOWN
+    assert results[-1].selected_prediction.gesture_id == GestureID.OPEN_PALM
+    assert results[-1].selected_prediction.metadata["suppress_command"] is True
     assert results[-1].command_event is None
+
+
+def test_pipeline_flushes_active_dynamic_segment_at_stream_end() -> None:
+    sender = MockCommandSender()
+    offsets = _active_motion_offsets()
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            )
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections(offsets)),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+        command_sender=sender,
+    )
+
+    _process_frames(pipeline, len(offsets))
+    result = pipeline.flush(len(offsets))
+
+    assert result.dynamic_state == "confirmed"
+    assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
+    assert result.command_event is not None
+    assert result.command_event.command == RobotCommand.MODE_TOGGLE
+    assert sender.last_event == result.command_event
+
+
+def test_pipeline_confirms_deferred_pull_candidate_after_segment_finishes() -> None:
+    sender = MockCommandSender()
+    offsets = _active_motion_offsets()
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+                min_pull_confirm_sustained_growth=0.0,
+                min_pull_confirm_positive_step_ratio=0.0,
+            ),
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            ),
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections(offsets)),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_DeferredPullClassifier(max_candidate_points=len(offsets) - 1),
+        command_sender=sender,
+    )
+
+    _process_frames(pipeline, len(offsets))
+    result = pipeline.flush(len(offsets))
+
+    assert result.dynamic_state == "confirmed"
+    assert result.dynamic_prediction.gesture_id == GestureID.PULL_TOWARD
+    assert result.dynamic_prediction.metadata["deferred_dynamic_candidate"] is True
+    assert result.selected_prediction.gesture_id == GestureID.PULL_TOWARD
+    assert result.command_event is not None
+    assert result.command_event.command == RobotCommand.APPROACH_OPERATOR
+    assert sender.last_event == result.command_event
 
 
 def test_pipeline_emits_dynamic_command_after_segment_finishes() -> None:
     sender = MockCommandSender()
     pipeline = GestureControlPipeline(
         config=AppConfig(
-            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+                static_priority_min_confidence=0.99,
+                dynamic_static_compatibility_min_confidence=0.99,
+            ),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -128,7 +178,56 @@ def test_pipeline_emits_dynamic_command_after_segment_finishes() -> None:
     assert sender.last_event == result.command_event
 
 
-def test_pipeline_emits_high_confidence_dynamic_command_before_motion_finishes() -> None:
+def test_pipeline_allows_confirmed_dynamic_segment_after_static_priority() -> None:
+    sender = MockCommandSender()
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+            ),
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            ),
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections(_finished_motion_offsets())),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+        command_sender=sender,
+    )
+
+    result = _process_frames(pipeline, len(_finished_motion_offsets()))[-1]
+
+    assert result.dynamic_state == "confirmed"
+    assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
+    assert result.command_event is not None
+    assert result.command_event.command == RobotCommand.MODE_TOGGLE
+
+
+def test_pipeline_blocks_weak_final_dynamic_segment_during_static_priority() -> None:
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+            ),
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            ),
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections(_finished_motion_offsets())),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.35),
+    )
+
+    result = _process_frames(pipeline, len(_finished_motion_offsets()))[-1]
+
+    assert result.dynamic_state == "segment_classified"
+    assert result.selected_prediction.gesture_id == GestureID.OPEN_PALM
+    assert result.command_event is None
+
+
+def test_pipeline_blocks_high_confidence_dynamic_pretrigger_while_static_is_stable() -> None:
     sender = MockCommandSender()
     offsets = _active_motion_offsets()
     pipeline = GestureControlPipeline(
@@ -147,19 +246,105 @@ def test_pipeline_emits_high_confidence_dynamic_command_before_motion_finishes()
     results = _process_frames(pipeline, len(offsets))
     result = results[-1]
 
-    assert result.dynamic_state == "confirmed"
-    assert result.dynamic_prediction.gesture_id == GestureID.WAVE_LR
-    assert result.dynamic_prediction.metadata["early_dynamic_candidate"] is True
-    assert result.selected_prediction.gesture_id == GestureID.WAVE_LR
-    assert result.command_event is not None
-    assert result.command_event.command == RobotCommand.MODE_TOGGLE
-    assert sender.last_event == result.command_event
+    assert result.dynamic_state == "early_dynamic_blocked"
+    assert result.dynamic_prediction.gesture_id == GestureID.UNKNOWN
+    assert result.dynamic_prediction.metadata["reason"] == "dynamic_blocked_by_static_priority"
+    assert result.selected_prediction.gesture_id == GestureID.OPEN_PALM
+    assert result.command_event is None
+    assert sender.last_event is not None
+    assert sender.last_event.command == RobotCommand.STOP
+
+
+def test_pipeline_blocks_dynamic_during_static_transition_grace() -> None:
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=5,
+                static_transition_grace_frames=4,
+            ),
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            ),
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections((0.0, 0.03, 0.07, 0.12, 0.18))),
+        static_classifier=_SequenceStaticClassifier(
+            (
+                GesturePrediction(GestureID.OPEN_PALM, 0.95),
+                GesturePrediction(GestureID.OPEN_PALM, 0.95),
+                GesturePrediction(GestureID.OPEN_PALM, 0.95),
+                GesturePrediction(GestureID.FIST, 0.96),
+                GesturePrediction(GestureID.FIST, 0.96),
+            )
+        ),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+    )
+
+    result = _process_frames(pipeline, 5)[-1]
+
+    assert result.dynamic_state == "early_dynamic_blocked"
+    assert result.selected_prediction.gesture_id == GestureID.FIST
+    assert result.command_event is None
+
+
+def test_pipeline_rejects_dynamic_segment_without_enough_confirmed_trajectory() -> None:
+    pipeline = GestureControlPipeline(
+        config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+                dynamic_min_confirm_path=1.0,
+            ),
+            command_mapping=CommandMappingConfig(
+                static_confirmation_frames=1,
+                dynamic_confirmation_frames=1,
+            ),
+        ),
+        detector=_SequenceDetector(_moving_open_palm_detections(_finished_motion_offsets())),
+        static_classifier=_FakeStaticClassifier(GestureID.OPEN_PALM, 0.95),
+        dynamic_classifier=_FakeDynamicClassifier(GestureID.WAVE_LR, 0.98),
+    )
+
+    result = _process_frames(pipeline, len(_finished_motion_offsets()))[-1]
+
+    assert result.dynamic_state == "segment_rejected"
+    assert result.dynamic_prediction.metadata["reason"] == "dynamic_segment_rejected"
+    assert result.selected_prediction.gesture_id == GestureID.OPEN_PALM
+    assert result.command_event is None
+
+
+def test_pipeline_accepts_dense_planar_segment_with_resampled_step() -> None:
+    pipeline = GestureControlPipeline()
+    segment = TrajectoryBuffer(max_size=40)
+    radius = 0.02
+    point_count = 36
+    for index in range(point_count):
+        angle = (2.0 * math.pi * index) / (point_count - 1)
+        x = 0.5 + math.cos(angle) * radius
+        y = 0.5 + math.sin(angle) * radius
+        segment.add_point(
+            TrajectoryPoint(
+                palm_center=(x, y, 0.0),
+                index_tip=(x + 0.02, y, 0.0),
+                hand_size=0.25,
+                timestamp=float(index) / 30.0,
+            )
+        )
+
+    assert pipeline._passes_dynamic_confirmation_gate(  # noqa: SLF001
+        segment,
+        GesturePrediction(GestureID.CIRCLE, 0.95),
+        GesturePrediction(GestureID.PINKY, 0.95),
+    )
 
 
 def test_pipeline_confirms_dynamic_segment_for_configured_frame_count() -> None:
     pipeline = GestureControlPipeline(
         config=AppConfig(
-            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+                static_priority_min_confidence=0.99,
+                dynamic_static_compatibility_min_confidence=0.99,
+            ),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=3,
@@ -269,6 +454,7 @@ def test_pipeline_clears_trajectory_after_dynamic_command() -> None:
     trajectory_buffer = TrajectoryBuffer(max_size=30)
     pipeline = GestureControlPipeline(
         config=AppConfig(
+            dynamic_classifier=DynamicClassifierConfig(static_priority_min_confidence=0.99),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -290,7 +476,10 @@ def test_pipeline_clears_trajectory_after_dynamic_command() -> None:
 def test_pipeline_applies_dynamic_cooldown_after_dynamic_command() -> None:
     pipeline = GestureControlPipeline(
         config=AppConfig(
-            dynamic_classifier=DynamicClassifierConfig(early_dynamic_min_points=99),
+            dynamic_classifier=DynamicClassifierConfig(
+                early_dynamic_min_points=99,
+                static_priority_min_confidence=0.99,
+            ),
             command_mapping=CommandMappingConfig(
                 static_confirmation_frames=1,
                 dynamic_confirmation_frames=1,
@@ -353,14 +542,14 @@ class _FakeStaticClassifier:
 
 
 class _SequenceStaticClassifier:
-    def __init__(self, predictions: list[GesturePrediction]) -> None:
+    def __init__(self, predictions: tuple[GesturePrediction, ...]) -> None:
         self._predictions = predictions
         self._index = 0
 
     def classify(self, raw_landmarks: object) -> GesturePrediction:
-        prediction = self._predictions[min(self._index, len(self._predictions) - 1)]
+        index = min(self._index, len(self._predictions) - 1)
         self._index += 1
-        return prediction
+        return self._predictions[index]
 
 
 class _FakeDynamicClassifier:
@@ -369,6 +558,16 @@ class _FakeDynamicClassifier:
 
     def classify(self, buffer: object) -> GesturePrediction:
         return self._prediction
+
+
+class _DeferredPullClassifier:
+    def __init__(self, max_candidate_points: int) -> None:
+        self._max_candidate_points = max_candidate_points
+
+    def classify(self, buffer: TrajectoryBuffer) -> GesturePrediction:
+        if 5 <= len(buffer) <= self._max_candidate_points:
+            return GesturePrediction(GestureID.PULL_TOWARD, 0.7)
+        return GesturePrediction.unknown("noisy_final_segment")
 
 
 def _process_frames(

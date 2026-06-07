@@ -153,6 +153,49 @@ class FallbackStaticGestureClassifier:
         )
 
 
+class ConfidenceFallbackStaticGestureClassifier:
+    """Use a secondary classifier when the primary static classifier is weak."""
+
+    def __init__(
+        self,
+        primary: Any,
+        fallback: Any,
+        primary_min_confidence: float,
+    ) -> None:
+        """Initialize confidence-gated primary/fallback classifiers."""
+
+        if primary_min_confidence < 0.0 or primary_min_confidence > 1.0:
+            raise ValueError("primary_min_confidence must be in [0, 1]")
+        self._primary = primary
+        self._fallback = fallback
+        self._primary_min_confidence = primary_min_confidence
+
+    def classify(self, raw_landmarks: LandmarkSequence) -> GesturePrediction:
+        """Classify landmarks with primary priority and secondary fallback."""
+
+        primary_prediction = cast(GesturePrediction, self._primary.classify(raw_landmarks))
+        if (
+            primary_prediction.gesture_id != GestureID.UNKNOWN
+            and primary_prediction.confidence >= self._primary_min_confidence
+        ):
+            return primary_prediction
+
+        fallback_prediction = cast(GesturePrediction, self._fallback.classify(raw_landmarks))
+        return GesturePrediction(
+            gesture_id=fallback_prediction.gesture_id,
+            confidence=fallback_prediction.confidence,
+            metadata={
+                **fallback_prediction.metadata,
+                "fallback_after": primary_prediction.metadata.get(
+                    "reason",
+                    primary_prediction.gesture_id.name,
+                ),
+                "primary_confidence": primary_prediction.confidence,
+                "primary_gesture": primary_prediction.gesture_id.name,
+            },
+        )
+
+
 class FallbackDynamicGestureClassifier:
     """Use trajectory heuristics when the model does not produce a dynamic gesture."""
 
@@ -182,12 +225,15 @@ class FallbackDynamicGestureClassifier:
                 )
             return prediction
         fallback_prediction = cast(GesturePrediction, self._fallback.classify(buffer))
+        if not _should_use_dynamic_fallback_after_unknown(prediction, fallback_prediction):
+            return prediction
         return GesturePrediction(
             gesture_id=fallback_prediction.gesture_id,
             confidence=fallback_prediction.confidence,
             metadata={
                 **fallback_prediction.metadata,
                 "fallback_after": prediction.metadata.get("reason", "model_unknown"),
+                "model_confidence": prediction.confidence,
             },
         )
 
@@ -205,6 +251,17 @@ def _should_prefer_dynamic_fallback(
     if model_prediction.gesture_id != GestureID.CIRCLE:
         return False
     return fallback_prediction.gesture_id in {GestureID.WAVE_LR, GestureID.PULL_TOWARD}
+
+
+def _should_use_dynamic_fallback_after_unknown(
+    model_prediction: GesturePrediction,
+    fallback_prediction: GesturePrediction,
+) -> bool:
+    if fallback_prediction.gesture_id == GestureID.UNKNOWN:
+        return False
+    if fallback_prediction.confidence < 0.90:
+        return False
+    return model_prediction.confidence < 0.35
 
 
 def _load_bundle(

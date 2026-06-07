@@ -165,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mirror-frame", action="store_true", help="Mirror frames first.")
     parser.add_argument("--limit", type=int, default=None, help="Export only the first N samples.")
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Reuse existing per-sample JSON files and only process missing samples.",
+    )
+    parser.add_argument(
         "--continue-on-error",
         action="store_true",
         help="Write empty JSON records for failed samples instead of stopping.",
@@ -200,8 +205,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         for sample in samples:
             sample_output = output_dir / f"{sample.sample_id}.json"
             try:
-                frame_count = exporter.export_sample(sample, sample_output)
-                note = ""
+                if args.skip_existing and sample_output.exists():
+                    frame_count, note = _existing_landmark_result(sample_output)
+                else:
+                    frame_count = exporter.export_sample(sample, sample_output)
+                    note = ""
             except Exception as exc:
                 if not args.continue_on_error:
                     raise
@@ -242,6 +250,17 @@ def _landmark_payload(
         "frame_count": len(frames),
         "note": note,
     }
+
+
+def _existing_landmark_result(path: Path) -> tuple[int, str]:
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Existing landmark payload must be a JSON object: {path}")
+    frame_count = payload.get("frame_count")
+    if frame_count is None:
+        frames = payload.get("frames", [])
+        frame_count = len(frames) if isinstance(frames, list) else 0
+    return int(frame_count), str(payload.get("note") or "")
 
 
 def _frame_payload(

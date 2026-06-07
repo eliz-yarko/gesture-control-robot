@@ -5,14 +5,6 @@ from src.domain import GestureID, GesturePrediction, RobotCommand
 from src.interpretation.command_mapper import CommandMapper
 
 
-def test_command_mapping_defaults_are_low_latency_for_demo() -> None:
-    config = CommandMappingConfig()
-
-    assert config.static_confirmation_frames == 3
-    assert config.dynamic_confirmation_frames == 1
-    assert config.emergency_confirmation_frames == 2
-
-
 def test_command_mapper_emits_static_command_after_debounce() -> None:
     mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=3))
     prediction = GesturePrediction(GestureID.OPEN_PALM, 0.9)
@@ -50,6 +42,15 @@ def test_command_mapper_emits_dynamic_command_immediately_by_default() -> None:
     assert event is not None
     assert event.command == RobotCommand.ROTATE_360
     assert event.gesture_id == GestureID.CIRCLE
+
+
+def test_command_mapper_uses_dynamic_confidence_threshold_for_dynamic_commands() -> None:
+    mapper = CommandMapper(CommandMappingConfig(min_confidence=0.65, dynamic_min_confidence=0.3))
+
+    event = mapper.update(GesturePrediction(GestureID.WAVE_LR, 0.4))
+
+    assert event is not None
+    assert event.command == RobotCommand.MODE_TOGGLE
 
 
 def test_command_mapper_resets_on_unknown_prediction() -> None:
@@ -101,6 +102,26 @@ def test_command_mapper_reports_confirmation_progress() -> None:
     assert state.required_frames == 3
     assert state.ready is False
     assert state.blocked_reason == "debouncing"
+
+
+def test_command_mapper_suppresses_command_from_prediction_metadata() -> None:
+    mapper = CommandMapper(CommandMappingConfig(static_confirmation_frames=1))
+    prediction = GesturePrediction(
+        GestureID.OPEN_PALM,
+        0.9,
+        metadata={
+            "suppress_command": True,
+            "suppress_reason": "static_command_suppressed_during_motion",
+        },
+    )
+
+    assert mapper.update(prediction) is None
+
+    state = mapper.confirmation_state
+    assert state.gesture_id == GestureID.OPEN_PALM
+    assert state.command == RobotCommand.STOP
+    assert state.stable_frames == 0
+    assert state.blocked_reason == "static_command_suppressed_during_motion"
 
 
 def test_command_mapper_reports_low_confidence_block() -> None:

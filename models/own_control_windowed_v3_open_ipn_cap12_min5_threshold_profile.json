@@ -1,0 +1,46 @@
+{
+  "baseline": {
+    "accuracy": 0.8,
+    "critical_false_positive_rate": 0.05263157894736842,
+    "macro_f1": 0.8027777777777777,
+    "macro_precision": 0.8055555555555555,
+    "macro_recall": 0.8333333333333334,
+    "mean_fps": 8.85482272054097,
+    "mean_latency_ms": 114.855840189626,
+    "min_fps": 5.58400099739468,
+    "p95_latency_ms": 132.09421668822566,
+    "sample_count": 20,
+    "unknown_rate": 0.0,
+    "weighted_f1": 0.8210526315789474
+  },
+  "class_thresholds": {
+    "CIRCLE": 0.25,
+    "FIST": 0.25,
+    "INDEX_LEFT": 0.25,
+    "INDEX_RIGHT": 0.25,
+    "OK_SIGN": 0.25,
+    "OPEN_PALM": 0.65,
+    "PINKY": 0.25,
+    "PULL_TOWARD": 0.25,
+    "THREE_FINGERS": 0.25,
+    "THUMB_DOWN": 0.6,
+    "THUMB_UP": 0.35,
+    "WAVE_LR": 0.25
+  },
+  "min_confidence": 0.25,
+  "source": "data\\processed\\benchmark_inputs\\own_control_windowed_v3_open_ipn_cap12_min5_test_predictions.csv",
+  "tuned": {
+    "accuracy": 0.85,
+    "critical_false_positive_rate": 0.0,
+    "macro_f1": 0.8333333333333334,
+    "macro_precision": 0.875,
+    "macro_recall": 0.8333333333333334,
+    "mean_fps": 8.85482272054097,
+    "mean_latency_ms": 114.855840189626,
+    "min_fps": 5.58400099739468,
+    "p95_latency_ms": 132.09421668822566,
+    "sample_count": 20,
+    "unknown_rate": 0.15,
+    "weighted_f1": 0.8596491228070174
+  }
+}

@@ -100,7 +100,23 @@ class CommandMapper:
 
         command = self._gesture_command_map.get(prediction.gesture_id, RobotCommand.UNKNOWN)
         required_frames = self._required_frames(prediction.gesture_id)
-        if prediction.confidence < self._config.min_confidence:
+        min_confidence = self._min_confidence(prediction.gesture_id)
+        if prediction.metadata.get("suppress_command"):
+            self._state = _DebounceState()
+            self._confirmation_state = CommandConfirmationState(
+                gesture_id=prediction.gesture_id,
+                command=command,
+                confidence=prediction.confidence,
+                stable_frames=0,
+                required_frames=required_frames,
+                ready=False,
+                blocked_reason=str(
+                    prediction.metadata.get("suppress_reason", "command_suppressed")
+                ),
+            )
+            return None
+
+        if prediction.confidence < min_confidence:
             self._state = _DebounceState()
             self._confirmation_state = CommandConfirmationState(
                 gesture_id=prediction.gesture_id,
@@ -170,3 +186,10 @@ class CommandMapper:
         if gesture_id.is_dynamic:
             return self._config.dynamic_confirmation_frames
         return self._config.static_confirmation_frames
+
+    def _min_confidence(self, gesture_id: GestureID) -> float:
+        if gesture_id == GestureID.THUMB_DOWN:
+            return max(self._config.min_confidence, self._config.emergency_min_confidence)
+        if gesture_id.is_dynamic:
+            return self._config.dynamic_min_confidence
+        return self._config.min_confidence

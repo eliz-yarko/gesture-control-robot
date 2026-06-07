@@ -1,0 +1,9 @@
+{
+  "min_confidence": 0.25,
+  "class_thresholds": {
+    "PULL_TOWARD": 0.25,
+    "WAVE_LR": 0.25
+  },
+  "source": "data\\processed\\benchmark_inputs\\ipn_hand_v4_safety_min5_dynamic_tuned_no_fallback_predictions.csv",
+  "tuned_for": "ipn_clean_accuracy_no_fallback"
+}
