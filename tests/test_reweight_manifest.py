@@ -24,11 +24,11 @@ def test_reweight_rows_duplicates_matching_dataset_and_label(tmp_path: Path) -> 
             "distance": "mixed",
         },
         {
-            "sample_id": "hagrid_thumb",
+            "sample_id": "hands_thumb",
             "path": "external/thumb.json",
             "expected_gesture": "THUMB_UP",
             "media_type": "landmarks",
-            "dataset": "hagrid_v2",
+            "dataset": "hands",
             "condition": "external",
             "distance": "unknown",
         },
@@ -45,7 +45,7 @@ def test_reweight_rows_duplicates_matching_dataset_and_label(tmp_path: Path) -> 
 
     assert [row["sample_id"] for row in reweighted] == [
         "own_thumb",
-        "hagrid_thumb",
+        "hands_thumb",
         "own_thumb_rw01",
         "own_thumb_rw02",
     ]

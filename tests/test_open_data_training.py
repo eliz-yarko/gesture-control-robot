@@ -90,11 +90,11 @@ def test_dynamic_window_label_marks_short_dynamic_prefixes_unknown() -> None:
 
 
 def test_build_open_data_manifest_combines_directory_and_ipn_sources(tmp_path: Path) -> None:
-    hagrid_dir = tmp_path / "hagrid_v2"
-    (hagrid_dir / "fist").mkdir(parents=True)
-    (hagrid_dir / "fist" / "001.jpg").write_text("placeholder", encoding="utf-8")
-    (hagrid_dir / "ok" / "sample.json").parent.mkdir()
-    (hagrid_dir / "ok" / "sample.json").write_text(
+    hands_dir = tmp_path / "hands"
+    (hands_dir / "fist").mkdir(parents=True)
+    (hands_dir / "fist" / "001.jpg").write_text("placeholder", encoding="utf-8")
+    (hands_dir / "ok" / "sample.json").parent.mkdir()
+    (hands_dir / "ok" / "sample.json").write_text(
         json.dumps({"landmarks": [[0.0, 0.0, 0.0] for _ in range(21)]}),
         encoding="utf-8",
     )
@@ -113,7 +113,7 @@ def test_build_open_data_manifest_combines_directory_and_ipn_sources(tmp_path: P
     output_path = tmp_path / "open_data_manifest.csv"
     result = build_open_data_manifest(
         output_path=output_path,
-        hagrid_dir=hagrid_dir,
+        hands_dir=hands_dir,
         ipn_root=ipn_root,
         limit_per_class=2,
     )

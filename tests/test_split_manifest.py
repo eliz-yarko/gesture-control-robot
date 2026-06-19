@@ -100,7 +100,7 @@ def _row(sample_id: str, label: str) -> dict[str, str]:
         "path": f"{sample_id}.jpg",
         "expected_gesture": label,
         "media_type": "image",
-        "dataset": "hagrid_v2",
+        "dataset": "hands",
         "condition": "normal",
         "distance": "unknown",
     }

@@ -17,38 +17,37 @@
 
 | Датасет | Тип даних | Для чого використовуємо | Ліцензія / доступ | Джерело |
 |---|---:|---|---|---|
-| HaGRID / HaGRIDv2 | RGB-зображення, bbox, hand landmarks | Основна оцінка 10 статичних жестів | CC BY-SA 4.0 variant, великі архіви | \cite{kapitanov2024hagrid}, \cite{nuzhdin2024hagridv2} |
+| HANDS | RGB-D статичні HRI-жести, bbox-анотації | Зовнішній sanity check для статичних жестів і HRI-сценарію | CC BY 4.0 | \cite{nuzzi2021hands} |
 | IPN Hand | RGB-відео 640x480, 30 FPS, continuous annotations | Динамічні жести та false-positive аналіз на continuous stream | CC BY 4.0 | \cite{benitez2021ipnhand} |
 | Jester | короткі RGB-кліпи жестів | Додаткова оцінка WAVE_LR, PULL_TOWARD і схожих рухів | Research-use license | \cite{materzynska2019jester} |
 | NVGesture | RGB/depth/IR відео динамічних жестів | Опційно для CIRCLE / push-pull, якщо підтверджено доступ і ліцензію | перевірити перед використанням | \cite{molchanov2016online} |
-| HANDS | RGB-D статичні HRI-жести | Малий HRI-oriented sanity check для статичних жестів | CC BY 4.0 | \cite{nuzzi2021hands} |
 
 ## Мапінг класів
 
 | Наш GestureID | Основне джерело | Кандидати класів у датасетах | Коментар |
 |---|---|---|---|
-| OPEN_PALM | HaGRIDv2 | `stop`, `palm` | Після візуальної перевірки можна залишити один клас або об'єднати два. |
-| FIST | HaGRIDv2 | `fist` | Прямий збіг. |
-| THUMB_UP | HaGRIDv2 / Jester | `like`, `Thumb Up` | Для статичного тесту краще HaGRIDv2. |
-| THUMB_DOWN | HaGRIDv2 / Jester | `dislike`, `Thumb Down` | Для критичної команди важливо окремо рахувати false positives. |
-| INDEX_LEFT | HaGRIDv2 + власний контроль | `point`, `one` + напрямок landmark vector | У HaGRID напрямок не є окремим label, тому left/right треба виводити з landmarks. |
-| INDEX_RIGHT | HaGRIDv2 + власний контроль | `point`, `one` + напрямок landmark vector | Потрібна перевірка балансу напрямків. |
-| PEACE | HaGRIDv2 | `peace`, `two_up` | Вибрати клас після ручного перегляду прикладів. |
-| THREE_FINGERS | HaGRIDv2 | `three`, `three2`, `three3` | Важливо відсіяти варіанти з піднятим великим пальцем. |
-| PINKY | HaGRIDv2 | `little_finger` | Прямий збіг у HaGRIDv2. |
-| OK_SIGN | HaGRIDv2 | `ok` | Прямий збіг. |
+| OPEN_PALM | HANDS / власний контроль | `span`, `open_palm`, `palm`, `five` | У HANDS це найближчі відкриті долоні; фінальний тест лишається на власному контрольному наборі. |
+| FIST | HANDS / власний контроль | `zero`, `digit_0`, `fist` | Для HRI-датасету може бути подано як жест цифри 0 або окремий class folder. |
+| THUMB_UP | власний контроль / Jester | `thumb_up`, `Thumb Up` | Якщо в зовнішньому статичному наборі немає точного збігу, клас оцінюється на власних зразках. |
+| THUMB_DOWN | власний контроль / Jester | `thumb_down`, `Thumb Down` | Для критичної команди важливо окремо рахувати false positives. |
+| INDEX_LEFT | HANDS + власний контроль | `point_left`, `pointing_left`, `direction_left` | Напрямок краще брати з явно розмічених directional класів або з landmark vector. |
+| INDEX_RIGHT | HANDS + власний контроль | `point_right`, `pointing_right`, `direction_right` | Потрібна перевірка балансу напрямків. |
+| PEACE | HANDS / власний контроль | `two`, `digit_2` | Наближений збіг через двопальцевий статичний жест. |
+| THREE_FINGERS | HANDS / власний контроль | `three`, `digit_3` | Наближений збіг через трипальцевий статичний жест. |
+| PINKY | власний контроль | `pinky`, `little_finger` | Якщо зовнішній dataset не має класу, залишити тільки власний контроль. |
+| OK_SIGN | HANDS / власний контроль | `ok`, `ok_sign` | Використовувати лише за наявності точного class folder у локальному subset. |
 | WAVE_LR | Jester / IPN Hand | `Shaking Hand`, `Swiping Left`, `Swiping Right`, IPN `Throw left/right` | Не всі класи є точним "помахом", тому результати треба називати partial benchmark. |
 | CIRCLE | NVGesture / власний контроль | rotating two fingers clockwise/counter-clockwise | Якщо NVGesture недоступний, потрібен малий власний контрольний набір. |
 | PULL_TOWARD | Jester / IPN Hand / NVGesture | `Pulling Hand In`, `Zooming In With Full Hand`, IPN `Zoom in` | Найближчий відкритий збіг для руху до камери. |
 
 ## Методика використання
 
-1. Завантажити лише потрібні класи, якщо датасет це дозволяє. Для HaGRIDv2 достатньо архівів
-   жестів, що відповідають нашому словнику.
+1. Завантажити лише потрібні класи, якщо датасет це дозволяє. Для HANDS достатньо RGB subset-у
+   класів, що мають прямий або обґрунтований наближений збіг із нашим словником.
 2. Не комітити raw data. Розміщувати їх локально в `data/external/`, а похідні landmark CSV/JSON -
    в `data/processed/`.
-3. Для статичних зображень використовувати наявні landmarks HaGRIDv2 або проганяти MediaPipe Hands,
-   якщо потрібна однакова схема preprocessing.
+3. Для статичних зображень проганяти MediaPipe Hands, якщо потрібна однакова схема preprocessing
+   між HANDS, власним контрольним набором та іншими джерелами.
 4. Для відео витягувати 30-кадрові вікна, будувати `TrajectoryBuffer`, а відсутність руки рахувати
    як `UNKNOWN`, а не викидати з оцінки.
 5. Розділити calibration/tuning та final evaluation. Якщо є `user_id` або `subject_id`, split робити
@@ -73,7 +72,7 @@
 
 - `sample_id` - стабільний ідентифікатор зразка;
 - `media_type` - `image`, `video` або `landmarks`; якщо порожньо, тип визначається за розширенням;
-- `dataset` - джерело даних, наприклад `hagrid_v2`, `jester`, `own_control`;
+- `dataset` - джерело даних, наприклад `hands`, `jester`, `own_control`;
 - `condition` - умова зйомки або категорія, наприклад `normal`, `low_light`;
 - `distance` - дистанція до камери, якщо відома.
 
@@ -81,7 +80,7 @@
 
 ```csv
 sample_id,path,expected_gesture,media_type,dataset,condition,distance
-hagrid_stop_001,../external/hagrid_v2/stop/001.jpg,OPEN_PALM,image,hagrid_v2,normal,unknown
+hands_span_001,../external/hands/span/001.jpg,OPEN_PALM,image,hands,normal,unknown
 jester_pull_001,../external/jester/pulling_hand_in/001.mp4,PULL_TOWARD,video,jester,normal,unknown
 circle_control_001,../processed/landmarks/circle_001.json,CIRCLE,landmarks,own_control,normal,1m
 ```
@@ -107,7 +106,7 @@ python scripts/evaluate_manifest.py `
 
 ```powershell
 python scripts/retrain_open_data.py `
-  --hagrid-dir data/external/hagrid_v2 `
+  --hands-dir data/external/hands `
   --ipn-root data/external/ipn_hand `
   --own-dir data/external/own_control `
   --output-manifest data/processed/training/open_data_manifest.csv `

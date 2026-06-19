@@ -24,7 +24,7 @@ def test_read_manifest_normalizes_labels_and_relative_paths(tmp_path: Path) -> N
         "\n".join(
             [
                 "sample_id,path,expected_gesture,media_type,dataset,condition,distance",
-                "s1,open_palm.jpg,0,,hagrid_v2,normal,1m",
+                "s1,open_palm.jpg,0,,hands,normal,1m",
             ]
         ),
         encoding="utf-8",
@@ -37,7 +37,7 @@ def test_read_manifest_normalizes_labels_and_relative_paths(tmp_path: Path) -> N
     assert samples[0].path == image_path
     assert samples[0].expected_gesture == "OPEN_PALM"
     assert samples[0].media_type == "image"
-    assert samples[0].dataset == "hagrid_v2"
+    assert samples[0].dataset == "hands"
 
 
 def test_read_manifest_supports_video_segments(tmp_path: Path) -> None:
@@ -80,7 +80,7 @@ def test_write_prediction_records_matches_benchmark_input_schema(tmp_path: Path)
                 confidence=0.95,
                 latency_ms=35.5,
                 fps=28.0,
-                dataset="hagrid_v2",
+                dataset="hands",
                 condition="normal",
                 distance="1m",
                 media_type="image",
@@ -101,7 +101,7 @@ def test_write_prediction_records_matches_benchmark_input_schema(tmp_path: Path)
             "confidence": "0.95",
             "latency_ms": "35.5",
             "fps": "28.0",
-            "dataset": "hagrid_v2",
+            "dataset": "hands",
             "condition": "normal",
             "distance": "1m",
             "media_type": "image",
@@ -127,21 +127,21 @@ def test_evaluate_parser_accepts_dynamic_confirmation_override() -> None:
     assert args.dynamic_confirmation_frames == 2
 
 
-def test_build_manifest_from_directory_maps_hagrid_subset(tmp_path: Path) -> None:
-    input_dir = tmp_path / "external" / "hagrid_v2"
+def test_build_manifest_from_directory_maps_hands_subset(tmp_path: Path) -> None:
+    input_dir = tmp_path / "external" / "hands"
     (input_dir / "fist").mkdir(parents=True)
-    (input_dir / "peace").mkdir()
+    (input_dir / "two").mkdir()
     (input_dir / "point").mkdir()
     (input_dir / "fist" / "001.jpg").write_text("placeholder", encoding="utf-8")
     (input_dir / "fist" / "002.jpg").write_text("placeholder", encoding="utf-8")
-    (input_dir / "peace" / "001.png").write_text("placeholder", encoding="utf-8")
+    (input_dir / "two" / "001.png").write_text("placeholder", encoding="utf-8")
     (input_dir / "point" / "001.jpg").write_text("placeholder", encoding="utf-8")
     output_path = tmp_path / "processed" / "manifest.csv"
 
     result = build_manifest_from_directory(
         input_dir=input_dir,
         output_path=output_path,
-        dataset="hagrid_v2",
+        dataset="hands",
         condition="normal",
         distance="1m",
         limit_per_class=1,
@@ -153,7 +153,7 @@ def test_build_manifest_from_directory_maps_hagrid_subset(tmp_path: Path) -> Non
 
     samples = read_manifest(output_path)
     assert [sample.expected_gesture for sample in samples] == ["FIST", "PEACE"]
-    assert samples[0].dataset == "hagrid_v2"
+    assert samples[0].dataset == "hands"
     assert samples[0].media_type == "image"
 
 

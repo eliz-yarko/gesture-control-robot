@@ -43,10 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build a combined open-data manifest and retrain gesture models."
     )
     parser.add_argument(
-        "--hagrid-dir",
+        "--hands-dir",
         type=Path,
         default=None,
-        help="Local HaGRID/HaGRIDv2 class-named directory.",
+        help="Local HANDS class-named directory.",
     )
     parser.add_argument(
         "--jester-dir",
@@ -138,7 +138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     result = build_open_data_manifest(
         output_path=args.output_manifest,
-        hagrid_dir=args.hagrid_dir,
+        hands_dir=args.hands_dir,
         jester_dir=args.jester_dir,
         own_dir=args.own_dir,
         ipn_root=args.ipn_root,
@@ -183,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def build_open_data_manifest(
     output_path: Path,
-    hagrid_dir: Path | None = None,
+    hands_dir: Path | None = None,
     jester_dir: Path | None = None,
     own_dir: Path | None = None,
     ipn_root: Path | None = None,
@@ -197,7 +197,7 @@ def build_open_data_manifest(
     skipped_items = 0
 
     for dataset, input_dir in (
-        ("hagrid_v2", hagrid_dir),
+        ("hands", hands_dir),
         ("jester", jester_dir),
         ("own_control", own_dir),
     ):

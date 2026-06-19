@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repo",
         required=True,
-        help="Dataset repo id, for example schwein69/hagrid-subset.",
+        help="Dataset repo id, for example username/static-gesture-subset.",
     )
     parser.add_argument("--output-root", required=True, help="Destination directory.")
     parser.add_argument(

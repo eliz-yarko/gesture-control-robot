@@ -8,7 +8,7 @@ Recommended local layout:
 ```text
 data/
 +-- external/
-|   +-- hagrid_v2/
+|   +-- hands/
 |   +-- ipn_hand/
 |   +-- jester/
 |   +-- nvgesture/
@@ -87,19 +87,19 @@ manifest and then split it with group-safe stratification:
 
 ```powershell
 python scripts/build_manifest.py `
-  --input data/external/hagrid_v2_subset `
-  --dataset hagrid_v2 `
-  --output data/processed/benchmark_inputs/hagrid_v2_subset_manifest.csv `
+  --input data/external/hands_subset `
+  --dataset hands `
+  --output data/processed/benchmark_inputs/hands_subset_manifest.csv `
   --condition external_static `
   --distance unknown `
   --limit-per-class 40 `
   --include-unknown
 
 python scripts/split_manifest.py `
-  --input data/processed/benchmark_inputs/hagrid_v2_subset_manifest.csv `
-  --train-output data/processed/training/hagrid_v2_subset_train_manifest.csv `
-  --control-output data/processed/benchmark_inputs/hagrid_v2_subset_control_manifest.csv `
-  --holdout-output data/processed/benchmark_inputs/hagrid_v2_subset_holdout_manifest.csv `
+  --input data/processed/benchmark_inputs/hands_subset_manifest.csv `
+  --train-output data/processed/training/hands_subset_train_manifest.csv `
+  --control-output data/processed/benchmark_inputs/hands_subset_control_manifest.csv `
+  --holdout-output data/processed/benchmark_inputs/hands_subset_holdout_manifest.csv `
   --control-count 150 `
   --holdout-count 70 `
   --seed 42
@@ -109,44 +109,19 @@ The splitter keeps each `sample_id` group in only one split. If the source subse
 for both requested targets, the shortfall is shared between control and holdout instead of
 starving holdout. The current local own-control data has only 96 valid cached landmark samples,
 so an external compatible subset is still required to reach the 120-150+ control and 56-70+
-holdout targets without leaking train-derived examples into evaluation.
+holdout targets without leaking train-derived examples into evaluation. HANDS is the preferred
+static replacement because it is a CC BY 4.0 HRI-oriented RGB-D dataset with DOI-backed
+publication metadata.
 
-For the HaGRID 30k 384p sample zip, extract only compatible static classes first:
-
-```powershell
-python scripts/extract_hagrid_zip_subset.py `
-  --zip data/external/hagrid-sample-30k-384p.zip `
-  --output-root data/external/hagrid_static_subset/all `
-  --class call `
-  --class palm `
-  --class fist `
-  --class like `
-  --class dislike `
-  --class peace `
-  --class three `
-  --class ok `
-  --limit-per-class 140 `
-  --seed 42
-```
-
-The current extracted subset has 1120 raw images across eight mapped labels. After landmark
-filtering, it provides 295 train, 144 control, and 78 holdout valid samples. The tuned v10
-own+HaGRID static candidate reaches HaGRID holdout accuracy `0.885` and macro F1 `0.905`,
-but it remains an ablation rather than a live replacement because it still causes one false
-`THUMB_DOWN` command on the own dense-valid control set.
-
-The safer runtime candidate keeps the stable v3 own-control static model as primary and uses
-the tuned v10 static model only as a low-confidence fallback:
+The safer runtime candidate keeps the stable v3 own-control static model and the open-IPN
+dynamic model:
 
 ```powershell
 python scripts/evaluate_manifest.py `
   --manifest data/processed/benchmark_inputs/own_control_test_landmarks_dense_valid_manifest.csv `
-  --output data/benchmarks/own_control_static_v3_primary_v10_tuned_fallback_p040_dynamic_v3_wave038_pipeline_dense_valid_predictions.csv `
+  --output data/benchmarks/own_control_static_v3_dynamic_v3_pipeline_dense_valid_predictions.csv `
   --classifier-mode pipeline `
   --static-model models/static_gesture_classifier_windowed_v3_open_ipn_min5.joblib `
-  --secondary-static-model models/static_gesture_classifier_windowed_v10_own_hagrid_static.joblib `
-  --secondary-static-threshold-profile models/hagrid_static_v10_safety_threshold_profile.json `
-  --primary-static-min-confidence 0.4 `
   --dynamic-model models/dynamic_gesture_classifier_windowed_v3_open_ipn_min5.joblib `
   --dynamic-threshold-profile models/dynamic_v3_wave_lr_safety_threshold_profile.json `
   --frame-stride 1 `
@@ -156,11 +131,10 @@ python scripts/evaluate_manifest.py `
   --mirror-frame
 ```
 
-This ensemble preserves the own dense-valid result (`accuracy=0.952`, `macro-F1=0.972`,
-false confirmed command rate `0.000`) while keeping the HaGRID static subset at the tuned
-v10 level (`control accuracy=0.868`, `holdout accuracy=0.885`). The current own holdout has
-only 31 valid landmark samples and reaches `accuracy=0.871`, so it is one correct prediction
-below `0.875` and still below the requested 56-70+ independent holdout count.
+The current own dense-valid pipeline result is kept as the local runtime baseline
+(`accuracy=0.952`, `macro-F1=0.972`, false confirmed command rate `0.000`). The current own
+holdout has only 31 valid landmark samples and reaches `accuracy=0.871`, so it is still below
+the requested 56-70+ independent holdout count.
 
 ## Landmark cache workflow
 
@@ -344,7 +318,7 @@ The same cached manifest can be merged with open-data subsets:
 ```powershell
 python scripts/retrain_open_data.py `
   --extra-manifest data/processed/benchmark_inputs/own_control_train_landmarks_manifest.csv `
-  --hagrid-dir data/external/hagrid_v2_subset `
+  --hands-dir data/external/hands_subset `
   --jester-dir data/external/jester_subset `
   --output-manifest data/processed/training/combined_cached_open_data_manifest.csv `
   --limit-per-class 80 `
@@ -354,15 +328,15 @@ python scripts/retrain_open_data.py `
   --min-dynamic-window-points 5
 ```
 
-Use small class-named subsets first. For example, HaGRID static folders can include `palm`,
-`fist`, `like`, `dislike`, `peace`, `three`, `little_finger`, `ok`, and `no_gesture`; Jester
-dynamic folders can include `swiping_left`, `swiping_right`, `shaking_hand`, `pulling_hand_in`,
-and `zooming_in_with_full_hand`.
+Use small class-named subsets first. For example, HANDS-compatible static folders can include
+`span`, `open_palm`, `zero`, `fist`, `point_left`, `point_right`, `two`, `three`, `ok`, and
+`no_gesture`; Jester dynamic folders can include `swiping_left`, `swiping_right`,
+`shaking_hand`, `pulling_hand_in`, and `zooming_in_with_full_hand`.
 
 Supported manifest presets:
 
 - `own_control` for locally recorded class folders named after project gestures.
-- `hagrid` / `hagrid_v2` for static gesture subsets.
+- `hands` for selected static HRI gesture folders.
 - `jester` for selected dynamic gesture folders.
 - `ipn_hand` for selected IPN Hand classes such as `G05`, `G06`, and `G10`.
 
